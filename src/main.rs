@@ -1,3 +1,4 @@
+mod models;
 mod server;
 
 #[tokio::main]
@@ -8,7 +9,9 @@ async fn main() {
         std::process::exit(1);
     });
 
-    warp::serve(server::get_routes())
+    let db = models::new_db();
+
+    warp::serve(server::get_routes(db))
         .run(server_config.get_socket_addr())
         .await;
 }
