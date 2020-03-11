@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct ServerConfig {
     pub port: u16
 }
@@ -6,7 +7,9 @@ impl ServerConfig {
     pub fn new(args: &[String]) -> Result<ServerConfig, ArgumentError> {
         if let Some(arg) = args.get(1) {
             if let Ok(port) = arg.parse() {
-                return Ok(ServerConfig { port })
+                let config = ServerConfig { port };
+                trace!("Read ServerConfig as {:?}", config);
+                return Ok(config)
             } else {
                 return Err(ArgumentError("Port is not a valid number"))
             }
