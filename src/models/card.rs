@@ -1,10 +1,4 @@
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    serde::Deserialize,
-    serde::Serialize,
-)]
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Card {
     pub id: uuid::Uuid,
     pub name: String,
@@ -18,7 +12,7 @@ impl Card {
             id,
             name,
             description,
-            image_uri
+            image_uri,
         }
     }
 }

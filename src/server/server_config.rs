@@ -1,6 +1,6 @@
 #[derive(Debug)]
 pub struct ServerConfig {
-    pub port: u16
+    pub port: u16,
 }
 
 impl ServerConfig {
@@ -9,9 +9,9 @@ impl ServerConfig {
             if let Ok(port) = arg.parse() {
                 let config = ServerConfig { port };
                 trace!("Read ServerConfig as {:?}", config);
-                return Ok(config)
+                return Ok(config);
             } else {
-                return Err(ArgumentError("Port is not a valid number"))
+                return Err(ArgumentError("Port is not a valid number"));
             }
         }
 
@@ -21,7 +21,7 @@ impl ServerConfig {
     pub fn get_socket_addr(&self) -> std::net::SocketAddr {
         std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
             std::net::Ipv4Addr::new(0, 0, 0, 0),
-            self.port
+            self.port,
         ))
     }
 }

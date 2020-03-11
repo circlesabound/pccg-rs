@@ -8,9 +8,7 @@ pub struct Api {
 
 impl Api {
     pub fn new(db: models::Db) -> Api {
-        Api {
-            db
-        }
+        Api { db }
     }
 
     pub fn get_random_card(&self) -> &models::Card {

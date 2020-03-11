@@ -1,7 +1,7 @@
 use super::card::Card;
 
 pub struct Db {
-    cards: Vec<Card>
+    cards: Vec<Card>,
 }
 
 impl Db {
@@ -33,7 +33,7 @@ impl Db {
         ));
 
         Db {
-            cards: pre_populated
+            cards: pre_populated,
         }
     }
 

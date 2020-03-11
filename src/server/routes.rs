@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use warp::{Filter, Rejection, Reply};
 
 pub fn get_routes(
-    api: Arc<Mutex<engine::Api>>
+    api: Arc<Mutex<engine::Api>>,
 ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
     let ping = warp::path!("ping")
         .and(warp::get())
@@ -22,7 +22,7 @@ pub fn get_routes(
 }
 
 fn with_engine_api(
-    api: Arc<Mutex<engine::Api>>
+    api: Arc<Mutex<engine::Api>>,
 ) -> impl Filter<Extract = (Arc<Mutex<engine::Api>>,), Error = Infallible> + Clone {
     warp::any().map(move || api.clone())
 }
