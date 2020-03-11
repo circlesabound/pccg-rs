@@ -1,7 +1,11 @@
 #[macro_use] extern crate log;
 
+mod engine;
 mod models;
 mod server;
+
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() {
@@ -15,10 +19,13 @@ async fn main() {
     });
 
     info!("Initialising db");
-    let db = models::new_db();
+    let db = models::Db::new();
+
+    info!("Initialising engine api");
+    let api = Arc::new(Mutex::new(engine::Api::new(db)));
 
     info!("Starting web server");
-    warp::serve(server::get_routes(db))
+    warp::serve(server::get_routes(api))
         .run(server_config.get_socket_addr())
         .await;
 }

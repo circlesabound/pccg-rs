@@ -1,22 +1,11 @@
-use std::sync::Arc;
-
-use rand::Rng;
-use tokio::sync::Mutex;
-
 use super::card::Card;
 
-pub type Db = Arc<Mutex<DbRep>>;
-
-pub fn new_db() -> Db {
-    DbRep::new()
-}
-
-pub struct DbRep {
+pub struct Db {
     cards: Vec<Card>
 }
 
-impl DbRep {
-    fn new() -> Db {
+impl Db {
+    pub fn new() -> Db {
         let mut pre_populated: Vec<Card> = Vec::with_capacity(4);
         pre_populated.push(Card::new(
             uuid::Uuid::parse_str("c95e4135-4503-4572-a8f0-37c40af11d5c").unwrap(),
@@ -43,13 +32,12 @@ impl DbRep {
             String::from("https://via.placeholder.com/300"),
         ));
 
-        Arc::new(Mutex::new(DbRep {
+        Db {
             cards: pre_populated
-        }))
+        }
     }
 
-    pub fn get_random(&self) -> &Card {
-        let mut rng = rand::thread_rng();
-        &self.cards[rng.gen_range(0, self.cards.len() - 1)]
+    pub fn cards(&self) -> &Vec<Card> {
+        &self.cards
     }
 }

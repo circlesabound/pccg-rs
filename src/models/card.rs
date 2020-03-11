@@ -6,10 +6,10 @@
     serde::Serialize,
 )]
 pub struct Card {
-    id: uuid::Uuid,
-    name: String,
-    description: String,
-    image_uri: String,
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub description: String,
+    pub image_uri: String,
 }
 
 impl Card {
