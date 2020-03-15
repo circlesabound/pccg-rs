@@ -5,11 +5,10 @@ use super::logging;
 
 use std::convert::Infallible;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use warp::{Filter, Rejection, Reply};
 
 pub fn build_routes(
-    api: Arc<Mutex<engine::Api>>,
+    api: Arc<engine::Api>,
 ) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
     let ping = warp::path!("ping")
         .and(warp::get())
@@ -24,7 +23,7 @@ pub fn build_routes(
 }
 
 fn with_engine_api(
-    api: Arc<Mutex<engine::Api>>,
-) -> impl Filter<Extract = (Arc<Mutex<engine::Api>>,), Error = Infallible> + Clone {
+    api: Arc<engine::Api>,
+) -> impl Filter<Extract = (Arc<engine::Api>,), Error = Infallible> + Clone {
     warp::any().map(move || api.clone())
 }

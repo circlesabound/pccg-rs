@@ -1,4 +1,4 @@
-use super::card::Card;
+use super::super::models::Card;
 
 pub struct Db {
     cards: Vec<Card>,

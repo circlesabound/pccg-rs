@@ -4,13 +4,15 @@ extern crate log;
 mod engine;
 mod models;
 mod server;
+mod storage;
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::signal;
 
 #[tokio::main]
 async fn main() {
     logging_init();
+    let ctrlc_future = ctrlc_handler_init();
 
     info!("Reading server config");
     let args: Vec<String> = std::env::args().collect();
@@ -20,16 +22,20 @@ async fn main() {
     });
 
     info!("Initialising db");
-    let db = models::Db::new();
+    let db = storage::Db::new();
 
     info!("Initialising engine api");
-    let api = Arc::new(Mutex::new(engine::Api::new(db)));
+    let api = Arc::new(engine::Api::new(db.cards().into_iter()));
 
     info!("Starting web server");
     let routes = server::build_routes(api);
-    warp::serve(routes)
-        .run(server_config.get_socket_addr())
-        .await;
+    let (_, server) = warp::serve(routes)
+        .bind_with_graceful_shutdown(
+            server_config.get_socket_addr(),
+            ctrlc_future);
+    server.await;
+
+    info!("Shutting down");
 }
 
 fn logging_init() {
@@ -39,4 +45,12 @@ fn logging_init() {
         std::env::set_var("RUST_LOG", "info");
     }
     pretty_env_logger::init();
+}
+
+/// Wrapper around tokio::signal::ctrl_c
+fn ctrlc_handler_init() -> impl futures::Future<Output = ()> {
+    async {
+        signal::ctrl_c().await.ok();
+        info!("SIGINT detected");
+    }
 }
