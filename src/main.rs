@@ -26,7 +26,8 @@ async fn main() {
     let api = Arc::new(Mutex::new(engine::Api::new(db)));
 
     info!("Starting web server");
-    warp::serve(server::get_routes(api))
+    let routes = server::build_routes(api);
+    warp::serve(routes)
         .run(server_config.get_socket_addr())
         .await;
 }
