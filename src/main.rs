@@ -6,8 +6,10 @@ mod models;
 mod server;
 mod storage;
 
+use std::future::Future;
 use std::sync::Arc;
 use tokio::signal;
+use tokio::stream;
 
 #[tokio::main]
 async fn main() {
@@ -25,7 +27,10 @@ async fn main() {
     let db = storage::Db::new();
 
     info!("Initialising engine api");
-    let api = Arc::new(engine::Api::new(db.cards().into_iter()));
+    let api = engine::Api::new(
+        stream::iter(db.cards())
+    ).await;
+    let api = Arc::new(api);
 
     info!("Starting web server");
     let routes = server::build_routes(api);
@@ -48,7 +53,7 @@ fn logging_init() {
 }
 
 /// Wrapper around tokio::signal::ctrl_c
-fn ctrlc_handler_init() -> impl futures::Future<Output = ()> {
+fn ctrlc_handler_init() -> impl Future<Output = ()> {
     async {
         signal::ctrl_c().await.ok();
         info!("SIGINT detected");

@@ -1,8 +1,8 @@
 use super::super::models;
 
-use futures::executor::block_on;
 use rand::Rng;
 use std::sync::Arc;
+use tokio::stream::{self, StreamExt};
 use tokio::sync::RwLock;
 
 pub struct Api {
@@ -10,11 +10,11 @@ pub struct Api {
 }
 
 impl Api {
-    pub fn new<'a, I>(
-        compendium_cards_iter: I
+    pub async fn new<'a, I>(
+        mut compendium_cards_stream: I
     ) -> Api
     where
-        I: Iterator<Item = &'a models::Card>
+        I: stream::Stream<Item = &'a models::Card> + Unpin
     {
         let api = Api {
             compendium: RwLock::new(Default::default()),
@@ -22,13 +22,15 @@ impl Api {
 
         let populate_compendium_future = async {
             let mut compendium = models::Compendium::new();
-            for card in compendium_cards_iter {
+            while let Some(card) = compendium_cards_stream.next().await {
                 compendium.cards.push(card.clone());
             }
             *api.compendium.write().await = Arc::new(compendium);
         };
 
-        block_on(populate_compendium_future);
+        tokio::join!(
+            populate_compendium_future
+        );
 
         api
     }
