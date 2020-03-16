@@ -1,7 +1,7 @@
-use super::super::engine;
 use super::engine_handlers;
 use super::health_handlers;
 use super::logging;
+use crate::engine;
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -18,8 +18,7 @@ pub fn build_routes(
         .and(with_engine_api(api))
         .and_then(engine_handlers::get_random);
 
-    ping.or(rnd)
-        .with(logging::log_incoming_request())
+    ping.or(rnd).with(logging::log_incoming_request())
 }
 
 fn with_engine_api(

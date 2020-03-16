@@ -4,17 +4,14 @@ extern crate log;
 mod engine;
 mod models;
 mod server;
-mod storage;
 
-use std::future::Future;
 use std::sync::Arc;
-use tokio::signal;
-use tokio::stream;
+use std::time;
+use tokio::{signal, task};
 
 #[tokio::main]
 async fn main() {
     logging_init();
-    let ctrlc_future = ctrlc_handler_init();
 
     info!("Reading server config");
     let args: Vec<String> = std::env::args().collect();
@@ -23,21 +20,28 @@ async fn main() {
         std::process::exit(1);
     });
 
-    info!("Initialising db");
-    let db = storage::Db::new();
+    let compendium_task = task::spawn(async {
+        info!("Loading compendium");
+        let sw = time::Instant::now();
+        let compendium = models::Compendium::from_file("compendium.json")
+            .await
+            .unwrap_or_else(|err| {
+                panic!("Problem loading compendium: {:?}", err);
+            });
+        info!("Loaded compendium in {:?}", sw.elapsed());
+        compendium
+    });
+
+    let compendium = compendium_task.await.unwrap();
 
     info!("Initialising engine api");
-    let api = engine::Api::new(
-        stream::iter(db.cards())
-    ).await;
+    let api = engine::Api::new(compendium).await;
     let api = Arc::new(api);
 
     info!("Starting web server");
     let routes = server::build_routes(api);
     let (_, server) = warp::serve(routes)
-        .bind_with_graceful_shutdown(
-            server_config.get_socket_addr(),
-            ctrlc_future);
+        .bind_with_graceful_shutdown(server_config.get_socket_addr(), ctrlc_handler());
     server.await;
 
     info!("Shutting down");
@@ -53,9 +57,7 @@ fn logging_init() {
 }
 
 /// Wrapper around tokio::signal::ctrl_c
-fn ctrlc_handler_init() -> impl Future<Output = ()> {
-    async {
-        signal::ctrl_c().await.ok();
-        info!("SIGINT detected");
-    }
+async fn ctrlc_handler() {
+    signal::ctrl_c().await.ok();
+    info!("SIGINT detected");
 }

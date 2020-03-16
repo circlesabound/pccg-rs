@@ -1,3 +1,5 @@
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
 #[derive(Debug)]
 pub struct ServerConfig {
     pub port: u16,
@@ -18,11 +20,8 @@ impl ServerConfig {
         Err(ArgumentError("Missing argument for port"))
     }
 
-    pub fn get_socket_addr(&self) -> std::net::SocketAddr {
-        std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
-            std::net::Ipv4Addr::new(0, 0, 0, 0),
-            self.port,
-        ))
+    pub fn get_socket_addr(&self) -> SocketAddr {
+        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), self.port))
     }
 }
 

@@ -1,0 +1,27 @@
+[
+    {
+        "id": "c95e4135-4503-4572-a8f0-37c40af11d5c",
+        "name": "Iolo Kirby",
+        "description": "Sample card 0",
+        "image_uri": "https://via.placeholder.com/300"
+    },
+    {
+        "id": "456ed2bc-b32f-49ad-ba1f-f0de01334e81",
+        "name": "Iolo Kirby",
+        "description": "Sample card 1",
+        "image_uri": "https://via.placeholder.com/300"
+    },
+    {
+        "id": "b708561e-81e2-4b54-872b-e8c025d2fd22",
+        "name": "Caitlyn Cote",
+        "description": "Sample card 2",
+        "image_uri": "https://via.placeholder.com/300"
+    },
+    {
+        "id": "6b87f972-7aa9-4ff9-b0dd-0d4fb819a25d",
+        "name": "Jameson Berg",
+        "description": "Sample card 3",
+        "image_uri": "https://via.placeholder.com/300"
+    }
+
+]
