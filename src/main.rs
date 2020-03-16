@@ -5,6 +5,8 @@ mod engine;
 mod models;
 mod server;
 
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time;
 use tokio::{signal, task};
@@ -13,21 +15,33 @@ use tokio::{signal, task};
 async fn main() {
     logging_init();
 
-    info!("Reading server config");
-    let args: Vec<String> = std::env::args().collect();
-    let server_config = server::ServerConfig::new(&args).unwrap_or_else(|err| {
-        eprintln!("Problem parsing arguments: {:?}", err);
+    info!("Parsing config path from argv");
+    let config_path = get_config_path_from_argv().unwrap_or_else(|err_msg| {
+        eprintln!("Problem parsing arguments: {:?}", err_msg);
         std::process::exit(1);
     });
 
-    let compendium_task = task::spawn(async {
-        info!("Loading compendium");
+    info!(
+        "Reading application config from {}",
+        config_path.to_str().unwrap()
+    );
+    let config_str = fs::read_to_string(config_path).unwrap();
+    let config: models::config::Config = toml::from_str(&config_str).unwrap();
+    let config = Arc::new(config);
+
+    let compendium_task_config = config.clone();
+    let compendium_task = task::spawn(async move {
+        info!(
+            "Loading compendium from {}",
+            compendium_task_config.compendium.file
+        );
         let sw = time::Instant::now();
-        let compendium = models::Compendium::from_file("compendium.json")
-            .await
-            .unwrap_or_else(|err| {
-                panic!("Problem loading compendium: {:?}", err);
-            });
+        let compendium =
+            models::Compendium::from_file(compendium_task_config.compendium.file.parse().unwrap())
+                .await
+                .unwrap_or_else(|err| {
+                    panic!("Problem loading compendium: {:?}", err);
+                });
         info!("Loaded compendium in {:?}", sw.elapsed());
         compendium
     });
@@ -41,7 +55,7 @@ async fn main() {
     info!("Starting web server");
     let routes = server::build_routes(api);
     let (_, server) = warp::serve(routes)
-        .bind_with_graceful_shutdown(server_config.get_socket_addr(), ctrlc_handler());
+        .bind_with_graceful_shutdown(config.server.get_socket_addr(), ctrlc_handler());
     server.await;
 
     info!("Shutting down");
@@ -60,4 +74,11 @@ fn logging_init() {
 async fn ctrlc_handler() {
     signal::ctrl_c().await.ok();
     info!("SIGINT detected");
+}
+
+fn get_config_path_from_argv() -> Result<PathBuf, String> {
+    let args: Vec<String> = std::env::args().collect();
+    args.get(1)
+        .ok_or(String::from("Missing arg"))
+        .map(|p| PathBuf::from(p))
 }

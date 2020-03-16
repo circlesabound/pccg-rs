@@ -11,5 +11,6 @@ RUN cargo install --path . --verbose
 
 FROM debian:buster-slim AS final
 COPY --from=builder /usr/local/cargo/bin/pccg-rs /bin
+COPY config.toml /bin
 EXPOSE 8080
-CMD ["pccg-rs", "8080"]
+CMD ["pccg-rs", "config.toml"]
