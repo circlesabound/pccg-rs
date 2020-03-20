@@ -14,6 +14,9 @@ pub fn build_routes(
     let ping = warp::path!("ping")
         .and(warp::get())
         .and_then(health_handlers::ping);
+    let version = warp::path!("version")
+        .and(warp::get())
+        .and_then(health_handlers::version);
     let rnd = warp::path!("rnd")
         .and(warp::get())
         .and(with_engine_api(api.clone()))
@@ -24,7 +27,8 @@ pub fn build_routes(
         .and(with_card_from_body())
         .and_then(engine_handlers::add_card);
 
-    ping.or(rnd)
+    ping.or(version)
+        .or(rnd)
         .or(compendium_put)
         .with(logging::log_incoming_request())
 }
