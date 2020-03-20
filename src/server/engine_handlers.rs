@@ -8,9 +8,16 @@ use warp::Reply;
 
 pub async fn get_random(api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
     info!("Handling:get_random");
-    let random_card = api.get_random_card().await;
-    let json = warp::reply::json(&random_card);
-    Ok(warp::reply::with_status(json, StatusCode::OK))
+    match api.get_random_card().await {
+        Some(card) => {
+            let json = warp::reply::json(&card);
+            Ok(warp::reply::with_status(json, StatusCode::OK))
+        }
+        None => {
+            let json = warp::reply::json(&"No cards in compendium");
+            Ok(warp::reply::with_status(json, StatusCode::NO_CONTENT))
+        }
+    }
 }
 
 pub async fn add_card(api: Arc<engine::Api>, card: models::Card) -> Result<impl Reply, Infallible> {
@@ -22,7 +29,7 @@ pub async fn add_card(api: Arc<engine::Api>, card: models::Card) -> Result<impl 
             return Ok(warp::reply::with_status(json, StatusCode::CREATED));
         }
         Err(e) => {
-            let json = warp::reply::json(&"error");
+            let json = warp::reply::json(&format!("Error: {:?}", e));
             return Ok(warp::reply::with_status(
                 json,
                 StatusCode::INTERNAL_SERVER_ERROR,

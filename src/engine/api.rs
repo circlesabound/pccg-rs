@@ -10,23 +10,15 @@ pub struct Api {
 impl Api {
     pub async fn new(compendium: models::Compendium) -> Api {
         Api { compendium }
-
-        // let populate_compendium_future = async {
-        //     let mut compendium = models::Compendium::new();
-        //     while let Some(card) = compendium_cards_stream.next().await {
-        //         compendium.cards.push(card.clone());
-        //     }
-        //     *api.compendium.write().await = Arc::new(compendium);
-        // };
-
-        // tokio::join!(populate_compendium_future);
-
-        // api
     }
 
-    pub async fn get_random_card(&self) -> models::Card {
+    pub async fn get_random_card(&self) -> Option<models::Card> {
         let cards = self.compendium.current.read().await;
-        cards[rand::thread_rng().gen_range(0, cards.len() - 1)].clone()
+        if cards.len() == 0 {
+            None
+        } else {
+            Some(cards[rand::thread_rng().gen_range(0, cards.len())].clone())
+        }
     }
 
     pub async fn add_card_to_compendium(
