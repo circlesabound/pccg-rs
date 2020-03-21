@@ -662,6 +662,7 @@ name = "pccg-rs"
 version = "0.1.0"
 dependencies = [
  "http",
+ "hyper",
  "log 0.4.8",
  "pretty_env_logger",
  "rand 0.7.3",

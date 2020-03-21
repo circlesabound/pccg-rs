@@ -18,19 +18,24 @@ pub fn build_routes(
     let version = warp::path!("version")
         .and(warp::get())
         .and_then(health_handlers::version);
-    let rnd = warp::path!("rnd")
+    let get_random = warp::path!("compendium" / "random")
         .and(warp::get())
         .and(with_engine_api(api.clone()))
         .and_then(engine_handlers::get_random);
-    let compendium_put = warp::path!("compendium" / Uuid)
+    let get_card = warp::path!("compendium" / Uuid)
+        .and(warp::get())
+        .and(with_engine_api(api.clone()))
+        .and_then(engine_handlers::get_card);
+    let put_card = warp::path!("compendium" / Uuid)
         .and(warp::put())
         .and(with_engine_api(api.clone()))
         .and(with_card_from_body())
         .and_then(engine_handlers::put_card);
 
     ping.or(version)
-        .or(rnd)
-        .or(compendium_put)
+        .or(get_random)
+        .or(get_card)
+        .or(put_card)
         .with(logging::log_incoming_request())
 }
 

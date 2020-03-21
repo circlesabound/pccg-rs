@@ -1,29 +1,58 @@
 use crate::models::Card;
+use rand::Rng;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 #[derive(Default)]
 pub struct Compendium {
-    pub current: RwLock<Arc<Vec<Card>>>,
+    pub current: RwLock<Arc<HashMap<Uuid, Card>>>,
     filename: PathBuf,
 }
 
 impl Compendium {
     pub async fn from_file(filename: PathBuf) -> Result<Compendium, Box<dyn Error>> {
         let contents = fs::read_to_string(&filename)?;
-        let cards: Vec<Card> = serde_json::from_str(&contents)?;
+        let cards: HashMap<Uuid, Card> = serde_json::from_str(&contents)?;
         Ok(Compendium {
             current: RwLock::new(Arc::new(cards)),
             filename: filename.clone(),
         })
     }
 
+    pub async fn get_card_by_id(&self, id: Uuid) -> Result<Option<Card>, CompendiumReadError> {
+        let cards = self.current.read().await;
+        Ok(cards.get(&id).map(|c| c.clone()))
+    }
+
+    pub async fn get_random_card(&self) -> Result<Option<Card>, CompendiumReadError> {
+        let cards = self.current.read().await;
+        if cards.is_empty() {
+            return Ok(None);
+        }
+
+        // TODO find another way to do this
+        let rnd = rand::thread_rng().gen_range(0, cards.len());
+        let mut iter = cards.values();
+        for _ in 0..rnd {
+            iter.next();
+        }
+        match iter.next() {
+            Some(c) => Ok(Some(c.clone())),
+            None => {
+                error!("Iterator error");
+                Err(CompendiumReadError::Internal("iterator error".into()))
+            }
+        }
+    }
+
     /// Inserts a new card into the compendium, or updates an existing card with the same ID
     /// if it already exists.
-    /// 
+    ///
     /// * If an insert operation was performed, returns `None`
     /// * If an update operation was performed, returns `Some` with the value of the replaced card
     pub async fn upsert_card(&self, card: Card) -> Result<Option<Card>, CompendiumWriteError> {
@@ -33,15 +62,15 @@ impl Compendium {
             let mut cards_mut = self.current.write().await;
 
             // Check whether ID already exists
-            match cards_mut.iter().find(|c| c.id == id) {
+            match cards_mut.get(&id) {
                 None => {
                     // ID does not exist, we are inserting a new card
 
-                    // Clone current card list
+                    // Clone current card collection
                     let mut new_cards = (**cards_mut).clone();
 
-                    // Add new card to the cloned list
-                    new_cards.push(card);
+                    // Add new card to the cloned collection
+                    new_cards.insert(id, card);
 
                     // Persist to storage
                     if let Err(e) = fs::write(
@@ -51,7 +80,7 @@ impl Compendium {
                         return Err(CompendiumWriteError::Io(e));
                     }
 
-                    // Swap in-memory list to the cloned list
+                    // Swap in-memory collection to the cloned hashmap
                     *cards_mut = Arc::new(new_cards);
 
                     Ok(None)
@@ -62,13 +91,13 @@ impl Compendium {
                     // Clone the original card so we can return it later
                     let old_card_clone = old_card.clone();
 
-                    // Clone current card list
+                    // Clone current card collection
                     let new_cards = (**cards_mut).clone();
 
-                    // Get the card to modify in the cloned list
-                    let mut card_to_modify = new_cards.iter().find(|c| c.id == id).unwrap();
+                    // Get the card to modify in the cloned collection
+                    let mut card_to_modify = new_cards.get(&id).unwrap();
 
-                    // Modify in-place (since this is a cloned list)
+                    // Modify in-place
                     std::mem::replace(&mut card_to_modify, &card);
 
                     // Persist to storage
@@ -79,7 +108,7 @@ impl Compendium {
                         return Err(CompendiumWriteError::Io(e));
                     }
 
-                    // Swap in-memory list to the cloned list
+                    // Swap in-memory collection to the cloned hashmap
                     *cards_mut = Arc::new(new_cards);
 
                     Ok(Some(old_card_clone))
@@ -88,6 +117,24 @@ impl Compendium {
         }
     }
 }
+
+#[derive(Debug)]
+pub enum CompendiumReadError {
+    Io(std::io::Error),
+    Internal(String),
+}
+
+impl std::fmt::Display for CompendiumReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "Error when performing a read operation on the compendium: {:?}",
+            self
+        )
+    }
+}
+
+impl std::error::Error for CompendiumReadError {}
 
 #[derive(Debug)]
 pub enum CompendiumWriteError {
