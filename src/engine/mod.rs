@@ -1,2 +1,2 @@
-mod api;
+pub mod api;
 pub use self::api::Api;

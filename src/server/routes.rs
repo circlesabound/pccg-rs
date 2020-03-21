@@ -6,6 +6,7 @@ use crate::models;
 
 use std::convert::Infallible;
 use std::sync::Arc;
+use uuid::Uuid;
 use warp::{Filter, Rejection, Reply};
 
 pub fn build_routes(
@@ -21,11 +22,11 @@ pub fn build_routes(
         .and(warp::get())
         .and(with_engine_api(api.clone()))
         .and_then(engine_handlers::get_random);
-    let compendium_put = warp::path!("compendium")
+    let compendium_put = warp::path!("compendium" / Uuid)
         .and(warp::put())
         .and(with_engine_api(api.clone()))
         .and(with_card_from_body())
-        .and_then(engine_handlers::add_card);
+        .and_then(engine_handlers::put_card);
 
     ping.or(version)
         .or(rnd)

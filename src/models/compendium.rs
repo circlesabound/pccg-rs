@@ -21,39 +21,78 @@ impl Compendium {
         })
     }
 
-    pub async fn add_card(&self, card: Card) -> Result<uuid::Uuid, CompendiumWriteError> {
+    /// Inserts a new card into the compendium, or updates an existing card with the same ID
+    /// if it already exists.
+    /// 
+    /// * If an insert operation was performed, returns `None`
+    /// * If an update operation was performed, returns `Some` with the value of the replaced card
+    pub async fn upsert_card(&self, card: Card) -> Result<Option<Card>, CompendiumWriteError> {
         let id = card.id;
         {
             // Obtain an exclusive write guard
             let mut cards_mut = self.current.write().await;
 
-            // Check for ID conflict
-            if cards_mut.iter().any(|c| c.id == id) {
-                return Err(CompendiumWriteError::Conflict);
+            // Check whether ID already exists
+            match cards_mut.iter().find(|c| c.id == id) {
+                None => {
+                    // ID does not exist, we are inserting a new card
+
+                    // Clone current card list
+                    let mut new_cards = (**cards_mut).clone();
+
+                    // Add new card to the cloned list
+                    new_cards.push(card);
+
+                    // Persist to storage
+                    if let Err(e) = fs::write(
+                        &self.filename,
+                        serde_json::to_string_pretty(&new_cards).unwrap(),
+                    ) {
+                        return Err(CompendiumWriteError::Io(e));
+                    }
+
+                    // Swap in-memory list to the cloned list
+                    *cards_mut = Arc::new(new_cards);
+
+                    Ok(None)
+                }
+                Some(old_card) => {
+                    // ID already exists, we are updating an existing card
+
+                    // Clone the original card so we can return it later
+                    let old_card_clone = old_card.clone();
+
+                    // Clone current card list
+                    let new_cards = (**cards_mut).clone();
+
+                    // Get the card to modify in the cloned list
+                    let mut card_to_modify = new_cards.iter().find(|c| c.id == id).unwrap();
+
+                    // Modify in-place (since this is a cloned list)
+                    std::mem::replace(&mut card_to_modify, &card);
+
+                    // Persist to storage
+                    if let Err(e) = fs::write(
+                        &self.filename,
+                        serde_json::to_string_pretty(&new_cards).unwrap(),
+                    ) {
+                        return Err(CompendiumWriteError::Io(e));
+                    }
+
+                    // Swap in-memory list to the cloned list
+                    *cards_mut = Arc::new(new_cards);
+
+                    Ok(Some(old_card_clone))
+                }
             }
-
-            // Clone current card list
-            let mut new_cards = (**cards_mut).clone();
-            new_cards.push(card);
-
-            // Persist to storage
-            if let Err(e) = fs::write(
-                &self.filename,
-                serde_json::to_string_pretty(&new_cards).unwrap(),
-            ) {
-                return Err(CompendiumWriteError::Io(e));
-            }
-
-            // Update in memory
-            *cards_mut = Arc::new(new_cards);
         }
-        Ok(id)
     }
 }
 
 #[derive(Debug)]
 pub enum CompendiumWriteError {
     Conflict,
+    NotFound,
     Io(std::io::Error),
 }
 

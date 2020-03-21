@@ -1,5 +1,6 @@
 use crate::engine;
 use crate::models;
+use super::util;
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -7,33 +8,39 @@ use warp::http::StatusCode;
 use warp::Reply;
 
 pub async fn get_random(api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
-    info!("Handling:get_random");
+    info!("Handling: get_random");
+
     match api.get_random_card().await {
         Some(card) => {
-            let json = warp::reply::json(&card);
-            Ok(warp::reply::with_status(json, StatusCode::OK))
+            Ok(util::reply_with_value(&card, StatusCode::OK))
         }
         None => {
-            let json = warp::reply::json(&"No cards in compendium");
-            Ok(warp::reply::with_status(json, StatusCode::NO_CONTENT))
+            Ok(util::reply_with_error(&"No cards in compendium", StatusCode::NO_CONTENT))
         }
     }
 }
 
-pub async fn add_card(api: Arc<engine::Api>, card: models::Card) -> Result<impl Reply, Infallible> {
-    info!("Handling:add_card");
-    info!("Card to add: {:?}", card);
-    match api.add_card_to_compendium(card).await {
-        Ok(c) => {
-            let json = warp::reply::json(&c);
-            return Ok(warp::reply::with_status(json, StatusCode::CREATED));
+pub async fn put_card(
+    id: uuid::Uuid,
+    api: Arc<engine::Api>,
+    card: models::Card,
+) -> Result<impl Reply, Infallible> {
+    info!("Handling: put_card");
+
+    // Validate explicit ID paramter matches ID in card
+    if id != card.id {
+        return Ok(util::reply_with_error(&"id mismatch", StatusCode::BAD_REQUEST));
+    }
+
+    match api.add_or_update_card_in_compendium(card).await {
+        Ok(engine::api::AddOrUpdateOperation::Add) => {
+            Ok(util::reply_empty(StatusCode::CREATED))
+        }
+        Ok(engine::api::AddOrUpdateOperation::Update) => {
+            Ok(util::reply_empty(StatusCode::OK))
         }
         Err(e) => {
-            let json = warp::reply::json(&format!("Error: {:?}", e));
-            return Ok(warp::reply::with_status(
-                json,
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ));
+            Ok(util::reply_with_error(&e, StatusCode::INTERNAL_SERVER_ERROR))
         }
     }
 }
