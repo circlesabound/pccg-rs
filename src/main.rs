@@ -46,10 +46,33 @@ async fn main() {
         compendium
     });
 
+    let user_registry_task_config = config.clone();
+    let user_registry_task = task::spawn(async move {
+        info!(
+            "Loading user registry from {}",
+            user_registry_task_config.user_registry.directory
+        );
+        let sw = time::Instant::now();
+        let user_registry = models::UserRegistry::from_fs(
+            user_registry_task_config
+                .user_registry
+                .directory
+                .parse()
+                .unwrap(),
+        )
+        .await
+        .unwrap_or_else(|err| {
+            panic!("Problem loading user registry: {:?}", err);
+        });
+        info!("Loaded user registry in {:?}", sw.elapsed());
+        user_registry
+    });
+
     let compendium = compendium_task.await.unwrap();
+    let user_registry = user_registry_task.await.unwrap();
 
     info!("Initialising engine api");
-    let api = engine::Api::new(compendium).await;
+    let api = engine::Api::new(compendium, user_registry).await;
     let api = Arc::new(api);
 
     info!("Starting web server");

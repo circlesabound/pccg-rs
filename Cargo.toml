@@ -11,8 +11,8 @@ name = "pccg-rs"
 path = "src/main.rs"
 
 [dependencies]
+dashmap = { version = "3.7", features = ["serde"] }
 http = "0.2"
-hyper = "0.13"
 log = "0.4"
 pretty_env_logger = "0.4.0"
 rand = "0.7"

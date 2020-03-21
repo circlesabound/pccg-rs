@@ -1,5 +1,4 @@
 use crate::models::Card;
-use rand::Rng;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
@@ -20,34 +19,8 @@ impl Compendium {
         let cards: HashMap<Uuid, Card> = serde_json::from_str(&contents)?;
         Ok(Compendium {
             current: RwLock::new(Arc::new(cards)),
-            filename: filename.clone(),
+            filename: filename,
         })
-    }
-
-    pub async fn get_card_by_id(&self, id: Uuid) -> Result<Option<Card>, CompendiumReadError> {
-        let cards = self.current.read().await;
-        Ok(cards.get(&id).map(|c| c.clone()))
-    }
-
-    pub async fn get_random_card(&self) -> Result<Option<Card>, CompendiumReadError> {
-        let cards = self.current.read().await;
-        if cards.is_empty() {
-            return Ok(None);
-        }
-
-        // TODO find another way to do this
-        let rnd = rand::thread_rng().gen_range(0, cards.len());
-        let mut iter = cards.values();
-        for _ in 0..rnd {
-            iter.next();
-        }
-        match iter.next() {
-            Some(c) => Ok(Some(c.clone())),
-            None => {
-                error!("Iterator error");
-                Err(CompendiumReadError::Internal("iterator error".into()))
-            }
-        }
     }
 
     /// Inserts a new card into the compendium, or updates an existing card with the same ID
@@ -119,27 +92,7 @@ impl Compendium {
 }
 
 #[derive(Debug)]
-pub enum CompendiumReadError {
-    Io(std::io::Error),
-    Internal(String),
-}
-
-impl std::fmt::Display for CompendiumReadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "Error when performing a read operation on the compendium: {:?}",
-            self
-        )
-    }
-}
-
-impl std::error::Error for CompendiumReadError {}
-
-#[derive(Debug)]
 pub enum CompendiumWriteError {
-    Conflict,
-    NotFound,
     Io(std::io::Error),
 }
 

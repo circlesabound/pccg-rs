@@ -18,6 +18,10 @@ pub fn build_routes(
     let version = warp::path!("version")
         .and(warp::get())
         .and_then(health_handlers::version);
+    let add_new_user = warp::path!("users" / "new")
+        .and(warp::post())
+        .and(with_engine_api(api.clone()))
+        .and_then(engine_handlers::add_user);
     let get_random = warp::path!("compendium" / "random")
         .and(warp::get())
         .and(with_engine_api(api.clone()))
@@ -33,6 +37,7 @@ pub fn build_routes(
         .and_then(engine_handlers::put_card);
 
     ping.or(version)
+        .or(add_new_user)
         .or(get_random)
         .or(get_card)
         .or(put_card)

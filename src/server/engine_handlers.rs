@@ -5,6 +5,7 @@ use crate::models;
 use engine::api::AddOrUpdateOperation;
 use std::convert::Infallible;
 use std::sync::Arc;
+use uuid::Uuid;
 use warp::http::StatusCode;
 use warp::Reply;
 
@@ -21,12 +22,12 @@ pub async fn get_random(api: Arc<engine::Api>) -> Result<impl Reply, Infallible>
     }
 }
 
-pub async fn get_card(id: uuid::Uuid, api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
-    info!("Handling: get_card");
+pub async fn add_user(api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
+    info!("Handling: add_user");
 
-    match api.get_card_by_id(id).await {
-        Ok(Some(card)) => Ok(util::reply_with_value(&card, StatusCode::OK)),
-        Ok(None) => Ok(util::reply_empty(StatusCode::NOT_FOUND)),
+    let id = uuid::Uuid::new_v4();
+    match api.add_new_user(id).await {
+        Ok(_) => Ok(util::reply_with_value(&id, StatusCode::CREATED)),
         Err(e) => Ok(util::reply_with_error(
             &e,
             StatusCode::INTERNAL_SERVER_ERROR
@@ -34,8 +35,21 @@ pub async fn get_card(id: uuid::Uuid, api: Arc<engine::Api>) -> Result<impl Repl
     }
 }
 
+pub async fn get_card(id: Uuid, api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
+    info!("Handling: get_card");
+
+    match api.get_card_by_id(id).await {
+        Ok(Some(card)) => Ok(util::reply_with_value(&card, StatusCode::OK)),
+        Ok(None) => Ok(util::reply_empty(StatusCode::NOT_FOUND)),
+        Err(e) => Ok(util::reply_with_error(
+            &e,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
 pub async fn put_card(
-    id: uuid::Uuid,
+    id: Uuid,
     api: Arc<engine::Api>,
     card: models::Card,
 ) -> Result<impl Reply, Infallible> {

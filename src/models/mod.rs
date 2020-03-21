@@ -5,3 +5,9 @@ mod compendium;
 pub use self::compendium::Compendium;
 
 pub mod config;
+
+mod user;
+pub use self::user::User;
+
+mod user_registry;
+pub use self::user_registry::UserRegistry;

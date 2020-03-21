@@ -2,19 +2,20 @@ use serde::Deserialize;
 
 #[derive(Clone, Deserialize)]
 pub struct Config {
-    pub server: ServerConfig,
     pub compendium: CompendiumConfig,
+    pub user_registry: UserRegistryConfig,
+    pub server: ServerConfig,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct CompendiumConfig {
+    pub file: String,
 }
 
 #[derive(Clone, Deserialize)]
 pub struct ServerConfig {
     pub ip: String,
     pub port: u16,
-}
-
-#[derive(Clone, Deserialize)]
-pub struct CompendiumConfig {
-    pub file: String,
 }
 
 impl ServerConfig {
@@ -24,4 +25,9 @@ impl ServerConfig {
             self.port,
         ))
     }
+}
+
+#[derive(Clone, Deserialize)]
+pub struct UserRegistryConfig {
+    pub directory: String,
 }
