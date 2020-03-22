@@ -4,6 +4,7 @@ extern crate log;
 mod engine;
 mod models;
 mod server;
+mod storage;
 
 use std::fs;
 use std::path::PathBuf;
