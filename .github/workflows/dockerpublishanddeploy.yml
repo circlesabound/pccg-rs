@@ -1,4 +1,4 @@
-name: Publish to GitHub Docker Registry
+name: Publish to GitHub Docker Registry and deploy via SSH
 
 on:
   push:
@@ -13,30 +13,19 @@ env:
   IMAGE_NAME: pccg-rs
 
 jobs:
-  # Run tests.
-  # See also https://docs.docker.com/docker-hub/builds/automated-testing/
   test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v2
-
       - name: Run tests
         run: |
           docker build . --file test.Dockerfile
 
-  # Push image to GitHub Packages.
-  # See also https://docs.docker.com/docker-hub/builds/
   push:
-    # Ensure test job passes before pushing image.
     needs: test
-
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-
     steps:
       - uses: actions/checkout@v2
-
       - name: Build image
         run: |
           COMMIT_HASH=$(git rev-parse --short "$GITHUB_SHA")
@@ -58,3 +47,16 @@ jobs:
 
           docker tag image $IMAGE_ID:latest
           docker push $IMAGE_ID:latest
+
+  deploy:
+    needs: push
+    runs-on: ubuntu-latest
+    steps:
+    - uses: appleboy/ssh-action@master
+      name: Deploy using SSH
+      with:
+        host: ${{ secrets.DEPLOY_HOST }}
+        username: ${{ secrets.DEPLOY_USERNAME }}
+        key: ${{ secrets.DEPLOY_KEY }}
+        port: ${{ secrets.DEPLOY_PORT }}
+        script: ~/deploy-latest.sh
