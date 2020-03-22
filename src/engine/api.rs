@@ -2,6 +2,8 @@ use crate::models::{Card, Compendium, User, UserRegistry};
 
 use rand::Rng;
 use std::error::Error;
+use std::sync::Arc;
+use uuid::Uuid;
 
 pub struct Api {
     compendium: Compendium,
@@ -16,7 +18,7 @@ impl Api {
         }
     }
 
-    pub async fn add_new_user(&self, id: uuid::Uuid) -> Result<(), Box<dyn Error>> {
+    pub async fn add_new_user(&self, id: Uuid) -> Result<(), Box<dyn Error>> {
         let user = User {
             id,
             cards: Vec::new(),
@@ -28,25 +30,28 @@ impl Api {
     }
 
     pub async fn get_random_card(&self) -> Result<Option<Card>, Box<dyn Error>> {
-        let cards = self.compendium.current.read().await;
+        let cards = Arc::clone(&self.compendium.current);
         if cards.is_empty() {
             return Ok(None);
         }
 
         // TODO find another way to do this
         let rnd = rand::thread_rng().gen_range(0, cards.len());
-        let mut iter = cards.values();
+        let mut iter = cards.iter();
         for _ in 0..rnd {
             iter.next();
         }
-        match iter.next() {
-            Some(c) => Ok(Some(c.clone())),
+
+        // Some funky borrow semantics here
+        let ret = match iter.next() {
+            Some(c) => Ok(Some(c.value().clone())),
             None => unreachable!(),
-        }
+        };
+        ret
     }
 
-    pub async fn get_card_by_id(&self, id: uuid::Uuid) -> Result<Option<Card>, Box<dyn Error>> {
-        let cards = self.compendium.current.read().await;
+    pub async fn get_card_by_id(&self, id: Uuid) -> Result<Option<Card>, Box<dyn Error>> {
+        let cards = Arc::clone(&self.compendium.current);
         Ok(cards.get(&id).map(|c| c.clone()))
     }
 

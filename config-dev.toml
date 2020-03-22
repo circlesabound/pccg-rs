@@ -3,7 +3,7 @@ ip = "0.0.0.0"
 port = 8080
 
 [compendium]
-file = "data/compendium.json"
+directory = "data/compendium"
 
 [user_registry]
-directory = "data/users"
+directory = "data/user_registry"

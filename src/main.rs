@@ -33,15 +33,16 @@ async fn main() {
     let compendium_task = task::spawn(async move {
         info!(
             "Loading compendium from {}",
-            compendium_task_config.compendium.file
+            compendium_task_config.compendium.directory
         );
         let sw = time::Instant::now();
-        let compendium =
-            models::Compendium::from_file(compendium_task_config.compendium.file.parse().unwrap())
-                .await
-                .unwrap_or_else(|err| {
-                    panic!("Problem loading compendium: {:?}", err);
-                });
+        let compendium = models::Compendium::from_fs(
+            compendium_task_config.compendium.directory.parse().unwrap(),
+        )
+        .await
+        .unwrap_or_else(|err| {
+            panic!("Problem loading compendium: {:?}", err);
+        });
         info!("Loaded compendium in {:?}", sw.elapsed());
         compendium
     });

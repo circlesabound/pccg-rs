@@ -9,7 +9,7 @@ pub struct Config {
 
 #[derive(Clone, Deserialize)]
 pub struct CompendiumConfig {
-    pub file: String,
+    pub directory: String,
 }
 
 #[derive(Clone, Deserialize)]

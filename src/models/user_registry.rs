@@ -35,7 +35,7 @@ impl UserRegistry {
         info!("Loaded {} users from filesystem", users.len());
         Ok(UserRegistry {
             current: Arc::new(users),
-            dirname
+            dirname,
         })
     }
 
@@ -46,10 +46,7 @@ impl UserRegistry {
             Vacant(v) => {
                 let json = serde_json::to_string_pretty(&user).unwrap();
                 v.insert(user);
-                match fs::write(
-                    &self.dirname.join(format!("{}.json", id)),
-                    json,
-                ) {
+                match fs::write(&self.dirname.join(format!("{}.json", id)), json) {
                     Ok(_) => Ok(()),
                     Err(e) => Err(UserRegistryWriteError::Io(e)),
                 }

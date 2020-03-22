@@ -1,25 +1,42 @@
 use crate::models::Card;
-use std::collections::HashMap;
+use dashmap::mapref::entry::Entry::*;
+use dashmap::DashMap;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 #[derive(Default)]
 pub struct Compendium {
-    pub current: RwLock<Arc<HashMap<Uuid, Card>>>,
-    filename: PathBuf,
+    pub current: Arc<DashMap<Uuid, Card>>,
+    dirname: PathBuf,
 }
 
 impl Compendium {
-    pub async fn from_file(filename: PathBuf) -> Result<Compendium, Box<dyn Error>> {
-        let contents = fs::read_to_string(&filename)?;
-        let cards: HashMap<Uuid, Card> = serde_json::from_str(&contents)?;
+    pub async fn from_fs(dirname: PathBuf) -> Result<Compendium, Box<dyn Error>> {
+        let cards: DashMap<Uuid, Card> = DashMap::new();
+        for entry in fs::read_dir(&dirname)? {
+            let filename = entry?.path();
+            let contents = fs::read_to_string(filename)?;
+            let card: Card = serde_json::from_str(&contents)?;
+
+            match cards.entry(card.id) {
+                Occupied(_) => {
+                    error!(
+                        "Detected duplicate card with id '{}' when loading Compendium",
+                        card.id
+                    );
+                    return Err(Box::new(CompendiumDataIntegrityError::DuplicateId(card.id)));
+                }
+                Vacant(v) => v.insert(card),
+            };
+        }
+
+        info!("Loaded {} cards from filesystem", cards.len());
         Ok(Compendium {
-            current: RwLock::new(Arc::new(cards)),
-            filename: filename,
+            current: Arc::new(cards),
+            dirname,
         })
     }
 
@@ -29,67 +46,41 @@ impl Compendium {
     /// * If an insert operation was performed, returns `None`
     /// * If an update operation was performed, returns `Some` with the value of the replaced card
     pub async fn upsert_card(&self, card: Card) -> Result<Option<Card>, CompendiumWriteError> {
-        let id = card.id;
-        {
-            // Obtain an exclusive write guard
-            let mut cards_mut = self.current.write().await;
-
-            // Check whether ID already exists
-            match cards_mut.get(&id) {
-                None => {
-                    // ID does not exist, we are inserting a new card
-
-                    // Clone current card collection
-                    let mut new_cards = (**cards_mut).clone();
-
-                    // Add new card to the cloned collection
-                    new_cards.insert(id, card);
-
-                    // Persist to storage
-                    if let Err(e) = fs::write(
-                        &self.filename,
-                        serde_json::to_string_pretty(&new_cards).unwrap(),
-                    ) {
-                        return Err(CompendiumWriteError::Io(e));
-                    }
-
-                    // Swap in-memory collection to the cloned hashmap
-                    *cards_mut = Arc::new(new_cards);
-
-                    Ok(None)
-                }
-                Some(old_card) => {
-                    // ID already exists, we are updating an existing card
-
-                    // Clone the original card so we can return it later
-                    let old_card_clone = old_card.clone();
-
-                    // Clone current card collection
-                    let new_cards = (**cards_mut).clone();
-
-                    // Get the card to modify in the cloned collection
-                    let mut card_to_modify = new_cards.get(&id).unwrap();
-
-                    // Modify in-place
-                    std::mem::replace(&mut card_to_modify, &card);
-
-                    // Persist to storage
-                    if let Err(e) = fs::write(
-                        &self.filename,
-                        serde_json::to_string_pretty(&new_cards).unwrap(),
-                    ) {
-                        return Err(CompendiumWriteError::Io(e));
-                    }
-
-                    // Swap in-memory collection to the cloned hashmap
-                    *cards_mut = Arc::new(new_cards);
-
-                    Ok(Some(old_card_clone))
-                }
+        let json = serde_json::to_string_pretty(&card).unwrap();
+        match self.current.entry(card.id) {
+            Occupied(mut o) => {
+                let old_card = o.get().clone();
+                let ret = match fs::write(&self.dirname.join(format!("{}.json", card.id)), json) {
+                    Ok(_) => Ok(Some(old_card)),
+                    Err(e) => Err(CompendiumWriteError::Io(e)),
+                };
+                o.insert(card);
+                ret
+            }
+            Vacant(v) => {
+                let ret = match fs::write(&self.dirname.join(format!("{}.json", card.id)), json) {
+                    Ok(_) => Ok(None),
+                    Err(e) => Err(CompendiumWriteError::Io(e)),
+                };
+                v.insert(card);
+                ret
             }
         }
     }
 }
+
+#[derive(Debug)]
+pub enum CompendiumDataIntegrityError {
+    DuplicateId(uuid::Uuid),
+}
+
+impl std::fmt::Display for CompendiumDataIntegrityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Data integrity issue with the compendium: {:?}", self)
+    }
+}
+
+impl std::error::Error for CompendiumDataIntegrityError {}
 
 #[derive(Debug)]
 pub enum CompendiumWriteError {

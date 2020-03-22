@@ -30,7 +30,7 @@ pub async fn add_user(api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
         Ok(_) => Ok(util::reply_with_value(&id, StatusCode::CREATED)),
         Err(e) => Ok(util::reply_with_error(
             &e,
-            StatusCode::INTERNAL_SERVER_ERROR
+            StatusCode::INTERNAL_SERVER_ERROR,
         )),
     }
 }
