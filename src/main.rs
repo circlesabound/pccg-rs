@@ -6,6 +6,7 @@ mod models;
 mod server;
 mod storage;
 
+use crate::storage::fs::FsStore;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -37,13 +38,13 @@ async fn main() {
             compendium_task_config.compendium.directory
         );
         let sw = time::Instant::now();
-        let compendium = models::Compendium::from_fs(
-            compendium_task_config.compendium.directory.parse().unwrap(),
-        )
-        .await
-        .unwrap_or_else(|err| {
-            panic!("Problem loading compendium: {:?}", err);
-        });
+        let storage: FsStore<models::Card> =
+            FsStore::new(PathBuf::from(&compendium_task_config.compendium.directory)).unwrap();
+        let compendium = models::Compendium::from_storage(Arc::new(storage))
+            .await
+            .unwrap_or_else(|err| {
+                panic!("Problem loading compendium: {:?}", err);
+            });
         info!("Loaded compendium in {:?}", sw.elapsed());
         compendium
     });
@@ -55,17 +56,15 @@ async fn main() {
             user_registry_task_config.user_registry.directory
         );
         let sw = time::Instant::now();
-        let user_registry = models::UserRegistry::from_fs(
-            user_registry_task_config
-                .user_registry
-                .directory
-                .parse()
-                .unwrap(),
-        )
-        .await
-        .unwrap_or_else(|err| {
-            panic!("Problem loading user registry: {:?}", err);
-        });
+        let storage: FsStore<models::User> = FsStore::new(PathBuf::from(
+            &user_registry_task_config.user_registry.directory,
+        ))
+        .unwrap();
+        let user_registry = models::UserRegistry::from_storage(Arc::new(storage))
+            .await
+            .unwrap_or_else(|err| {
+                panic!("Problem loading user registry: {:?}", err);
+            });
         info!("Loaded user registry in {:?}", sw.elapsed());
         user_registry
     });

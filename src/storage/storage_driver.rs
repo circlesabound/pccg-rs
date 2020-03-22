@@ -1,10 +1,11 @@
-use serde::{Deserialize, Serialize};
-use std::error::Error;
+use crate::storage;
+use serde::{de::DeserializeOwned, Serialize};
 use uuid::Uuid;
 
-pub trait StorageDriver<'de, Item> {
-    type Item: Deserialize<'de> + Serialize;
+pub trait StorageDriver<Item>: Send + Sync {
+    type Item: DeserializeOwned + Serialize;
 
-    fn read(&self, id: &Uuid) -> Result<Option<Item>, Box<dyn Error>>;
-    fn write(&self, id: &Uuid, value: &Item) -> Result<(), Box<dyn Error>>;
+    fn read(&self, id: &Uuid) -> storage::Result<Option<Item>>;
+    fn read_all(&self) -> storage::Result<Vec<Item>>;
+    fn write(&self, id: &Uuid, value: &Item) -> storage::Result<()>;
 }

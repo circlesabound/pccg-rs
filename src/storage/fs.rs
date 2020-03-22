@@ -1,8 +1,8 @@
 use super::StorageDriver;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::error::Error;
+use crate::storage;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use uuid::Uuid;
 
 pub struct FsStore<T> {
@@ -11,7 +11,7 @@ pub struct FsStore<T> {
 }
 
 impl<T> FsStore<T> {
-    pub fn new<P: Into<PathBuf>>(dirname: P) -> Result<FsStore<T>, Box<dyn Error>> {
+    pub fn new<P: Into<PathBuf>>(dirname: P) -> storage::Result<FsStore<T>> {
         Ok(FsStore {
             dirname: PathBuf::from(dirname.into()),
             _item_type: std::marker::PhantomData,
@@ -23,10 +23,10 @@ impl<T> FsStore<T> {
     }
 }
 
-impl<'de, T: DeserializeOwned + Serialize> StorageDriver<'de, T> for FsStore<T> {
+impl<T: DeserializeOwned + Serialize + Send + Sync> StorageDriver<T> for FsStore<T> {
     type Item = T;
 
-    fn read(&self, id: &Uuid) -> Result<Option<T>, Box<dyn Error>> {
+    fn read(&self, id: &Uuid) -> storage::Result<Option<T>> {
         let path = self.get_filename_from_id(id);
         match path.exists() {
             false => Ok(None),
@@ -38,7 +38,18 @@ impl<'de, T: DeserializeOwned + Serialize> StorageDriver<'de, T> for FsStore<T> 
         }
     }
 
-    fn write(&self, id: &Uuid, value: &T) -> Result<(), Box<dyn Error>> {
+    fn read_all(&self) -> storage::Result<Vec<T>> {
+        let mut ret: Vec<T> = vec![];
+        for entry in fs::read_dir(&self.dirname)? {
+            let filename = entry?.path();
+            let contents = fs::read_to_string(filename)?;
+            let item: T = serde_json::from_str(&contents)?;
+            ret.push(item);
+        }
+        Ok(ret)
+    }
+
+    fn write(&self, id: &Uuid, value: &T) -> storage::Result<()> {
         let json = serde_json::to_string_pretty(&value)?;
         Ok(fs::write(self.get_filename_from_id(id), json)?)
     }

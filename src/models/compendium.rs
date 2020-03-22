@@ -1,26 +1,23 @@
 use crate::models::Card;
+use crate::storage::{self, StorageDriver};
 use dashmap::mapref::entry::Entry::*;
 use dashmap::DashMap;
 use std::error::Error;
-use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[derive(Default)]
 pub struct Compendium {
     pub current: Arc<DashMap<Uuid, Card>>,
-    dirname: PathBuf,
+    storage: Arc<dyn StorageDriver<Card, Item = Card>>,
 }
 
 impl Compendium {
-    pub async fn from_fs(dirname: PathBuf) -> Result<Compendium, Box<dyn Error>> {
+    pub async fn from_storage<T: 'static>(storage: Arc<T>) -> Result<Compendium, Box<dyn Error>>
+    where
+        T: StorageDriver<Card, Item = Card>,
+    {
         let cards: DashMap<Uuid, Card> = DashMap::new();
-        for entry in fs::read_dir(&dirname)? {
-            let filename = entry?.path();
-            let contents = fs::read_to_string(filename)?;
-            let card: Card = serde_json::from_str(&contents)?;
-
+        for card in storage.read_all()? {
             match cards.entry(card.id) {
                 Occupied(_) => {
                     error!(
@@ -33,10 +30,10 @@ impl Compendium {
             };
         }
 
-        info!("Loaded {} cards from filesystem", cards.len());
+        info!("Loaded {} cards from storage", cards.len());
         Ok(Compendium {
             current: Arc::new(cards),
-            dirname,
+            storage,
         })
     }
 
@@ -46,21 +43,20 @@ impl Compendium {
     /// * If an insert operation was performed, returns `None`
     /// * If an update operation was performed, returns `Some` with the value of the replaced card
     pub async fn upsert_card(&self, card: Card) -> Result<Option<Card>, CompendiumWriteError> {
-        let json = serde_json::to_string_pretty(&card).unwrap();
         match self.current.entry(card.id) {
             Occupied(mut o) => {
                 let old_card = o.get().clone();
-                let ret = match fs::write(&self.dirname.join(format!("{}.json", card.id)), json) {
+                let ret = match self.storage.write(&card.id, &card) {
                     Ok(_) => Ok(Some(old_card)),
-                    Err(e) => Err(CompendiumWriteError::Io(e)),
+                    Err(e) => Err(CompendiumWriteError::Storage(e)),
                 };
                 o.insert(card);
                 ret
             }
             Vacant(v) => {
-                let ret = match fs::write(&self.dirname.join(format!("{}.json", card.id)), json) {
+                let ret = match self.storage.write(&card.id, &card) {
                     Ok(_) => Ok(None),
-                    Err(e) => Err(CompendiumWriteError::Io(e)),
+                    Err(e) => Err(CompendiumWriteError::Storage(e)),
                 };
                 v.insert(card);
                 ret
@@ -84,7 +80,7 @@ impl std::error::Error for CompendiumDataIntegrityError {}
 
 #[derive(Debug)]
 pub enum CompendiumWriteError {
-    Io(std::io::Error),
+    Storage(storage::Error),
 }
 
 impl std::fmt::Display for CompendiumWriteError {
