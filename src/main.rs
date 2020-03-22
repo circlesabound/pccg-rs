@@ -31,7 +31,7 @@ async fn main() {
     let config: models::config::Config = toml::from_str(&config_str).unwrap();
     let config = Arc::new(config);
 
-    let compendium_task_config = config.clone();
+    let compendium_task_config = Arc::clone(&config);
     let compendium_task = task::spawn(async move {
         info!(
             "Loading compendium from {}",
@@ -49,7 +49,7 @@ async fn main() {
         compendium
     });
 
-    let user_registry_task_config = config.clone();
+    let user_registry_task_config = Arc::clone(&config);
     let user_registry_task = task::spawn(async move {
         info!(
             "Loading user registry from {}",

@@ -1,5 +1,6 @@
-use crate::models::{Card, Compendium, User, UserRegistry};
+use crate::models::{Card, Compendium, CompendiumError, CompendiumReadError, User, UserRegistry};
 
+use dashmap::mapref::entry::Entry::*;
 use rand::Rng;
 use std::error::Error;
 use std::sync::Arc;
@@ -26,6 +27,26 @@ impl Api {
         match self.user_registry.add_user(user).await {
             Ok(_) => Ok(()),
             Err(e) => Err(Box::new(e)),
+        }
+    }
+
+    pub async fn add_card_to_user(
+        &self,
+        user_id: Uuid,
+        card_id: Uuid,
+    ) -> Result<(), Box<dyn Error>> {
+        // Check card exists
+        match self.compendium.current.entry(card_id) {
+            Vacant(_) => Err(Box::new(CompendiumError::Read(
+                CompendiumReadError::CardNotFound(card_id),
+            ))),
+            Occupied(_) => {
+                // Add to user
+                match self.user_registry.add_card_to_user(user_id, card_id).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(Box::new(e)),
+                }
+            }
         }
     }
 

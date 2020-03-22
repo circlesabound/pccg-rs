@@ -24,7 +24,9 @@ impl Compendium {
                         "Detected duplicate card with id '{}' when loading Compendium",
                         card.id
                     );
-                    return Err(Box::new(CompendiumDataIntegrityError::DuplicateId(card.id)));
+                    return Err(Box::new(CompendiumError::DataIntegrity(
+                        CompendiumDataIntegrityError::DuplicateId(card.id),
+                    )));
                 }
                 Vacant(v) => v.insert(card),
             };
@@ -42,13 +44,13 @@ impl Compendium {
     ///
     /// * If an insert operation was performed, returns `None`
     /// * If an update operation was performed, returns `Some` with the value of the replaced card
-    pub async fn upsert_card(&self, card: Card) -> Result<Option<Card>, CompendiumWriteError> {
+    pub async fn upsert_card(&self, card: Card) -> Result<Option<Card>, CompendiumError> {
         match self.current.entry(card.id) {
             Occupied(mut o) => {
                 let old_card = o.get().clone();
                 let ret = match self.storage.write(&card.id, &card) {
                     Ok(_) => Ok(Some(old_card)),
-                    Err(e) => Err(CompendiumWriteError::Storage(e)),
+                    Err(e) => Err(CompendiumWriteError::Storage(e).into()),
                 };
                 o.insert(card);
                 ret
@@ -56,7 +58,7 @@ impl Compendium {
             Vacant(v) => {
                 let ret = match self.storage.write(&card.id, &card) {
                     Ok(_) => Ok(None),
-                    Err(e) => Err(CompendiumWriteError::Storage(e)),
+                    Err(e) => Err(CompendiumWriteError::Storage(e).into()),
                 };
                 v.insert(card);
                 ret
@@ -66,31 +68,53 @@ impl Compendium {
 }
 
 #[derive(Debug)]
-pub enum CompendiumDataIntegrityError {
-    DuplicateId(uuid::Uuid),
+pub enum CompendiumError {
+    DataIntegrity(CompendiumDataIntegrityError),
+    Read(CompendiumReadError),
+    Write(CompendiumWriteError),
 }
 
-impl std::fmt::Display for CompendiumDataIntegrityError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Data integrity issue with the compendium: {:?}", self)
-    }
-}
+impl std::error::Error for CompendiumError {}
 
-impl std::error::Error for CompendiumDataIntegrityError {}
-
-#[derive(Debug)]
-pub enum CompendiumWriteError {
-    Storage(storage::Error),
-}
-
-impl std::fmt::Display for CompendiumWriteError {
+impl std::fmt::Display for CompendiumError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "Error when performing a write operation on the compendium: {:?}",
+            "Error when performing an operation on Compendium: {:?}",
             self
         )
     }
 }
 
-impl std::error::Error for CompendiumWriteError {}
+impl From<CompendiumDataIntegrityError> for CompendiumError {
+    fn from(e: CompendiumDataIntegrityError) -> Self {
+        CompendiumError::DataIntegrity(e)
+    }
+}
+
+impl From<CompendiumReadError> for CompendiumError {
+    fn from(e: CompendiumReadError) -> Self {
+        CompendiumError::Read(e)
+    }
+}
+
+impl From<CompendiumWriteError> for CompendiumError {
+    fn from(e: CompendiumWriteError) -> Self {
+        CompendiumError::Write(e)
+    }
+}
+
+#[derive(Debug)]
+pub enum CompendiumDataIntegrityError {
+    DuplicateId(uuid::Uuid),
+}
+
+#[derive(Debug)]
+pub enum CompendiumReadError {
+    CardNotFound(uuid::Uuid),
+}
+
+#[derive(Debug)]
+pub enum CompendiumWriteError {
+    Storage(storage::Error),
+}

@@ -52,6 +52,31 @@ impl UserRegistry {
             }
         }
     }
+
+    pub async fn add_card_to_user(
+        &self,
+        user_id: Uuid,
+        card_id: Uuid,
+    ) -> Result<(), UserRegistryError> {
+        match self.current.entry(user_id) {
+            Vacant(_) => Err(UserRegistryWriteError::NotFound.into()),
+            Occupied(mut o) => {
+                // Clone and mutate
+                let mut new = o.get().clone();
+                new.cards.push(card_id);
+
+                // Persist to storage
+                match self.storage.write(&new.id, &new) {
+                    Ok(_) => {
+                        // Reflect in-memory
+                        o.insert(new);
+                        Ok(())
+                    }
+                    Err(e) => Err(UserRegistryWriteError::Storage(e).into()),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -92,5 +117,6 @@ pub enum UserRegistryDataIntegrityError {
 #[derive(Debug)]
 pub enum UserRegistryWriteError {
     Conflict,
+    NotFound,
     Storage(storage::Error),
 }
