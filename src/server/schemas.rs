@@ -12,3 +12,7 @@ pub struct AddCardToUserRequest {
 pub struct PutCardToCompendiumRequest {
     pub card: models::Card,
 }
+
+pub type ListUsersFromRegistryResponse = Vec<Uuid>;
+
+pub type ListCardsFromCompendiumResponse = Vec<Uuid>;

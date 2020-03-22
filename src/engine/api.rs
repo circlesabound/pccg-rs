@@ -2,6 +2,7 @@ use crate::models::{Card, Compendium, CompendiumError, CompendiumReadError, User
 
 use dashmap::mapref::entry::Entry::*;
 use rand::Rng;
+use std::convert::Infallible;
 use std::error::Error;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -40,7 +41,7 @@ impl Api {
             Vacant(_) => Err(Box::new(CompendiumError::Read(
                 CompendiumReadError::CardNotFound(card_id),
             ))),
-            Occupied(_) => {
+            Occupied(_o) => {
                 // Add to user
                 match self.user_registry.add_card_to_user(user_id, card_id).await {
                     Ok(_) => Ok(()),
@@ -48,6 +49,19 @@ impl Api {
                 }
             }
         }
+    }
+
+    pub async fn get_user_ids(&self) -> Result<Vec<Uuid>, Infallible> {
+        Ok(self
+            .user_registry
+            .current
+            .iter()
+            .map(|kvp| kvp.key().clone())
+            .collect())
+    }
+
+    pub async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>, Box<dyn Error>> {
+        Ok(self.user_registry.current.get(&id).map(|u| u.clone()))
     }
 
     pub async fn get_random_card(&self) -> Result<Option<Card>, Box<dyn Error>> {
@@ -71,9 +85,17 @@ impl Api {
         ret
     }
 
+    pub async fn get_card_ids(&self) -> Result<Vec<Uuid>, Infallible> {
+        Ok(self
+            .compendium
+            .current
+            .iter()
+            .map(|kvp| kvp.key().clone())
+            .collect())
+    }
+
     pub async fn get_card_by_id(&self, id: Uuid) -> Result<Option<Card>, Box<dyn Error>> {
-        let cards = Arc::clone(&self.compendium.current);
-        Ok(cards.get(&id).map(|c| c.clone()))
+        Ok(self.compendium.current.get(&id).map(|c| c.clone()))
     }
 
     pub async fn add_or_update_card_in_compendium(

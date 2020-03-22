@@ -26,6 +26,22 @@ pub async fn get_random_card_from_compendium(
     }
 }
 
+pub async fn get_user_from_registry(
+    id: Uuid,
+    api: Arc<engine::Api>,
+) -> Result<impl Reply, Infallible> {
+    info!("Handling: get_user_from_registry");
+
+    match api.get_user_by_id(id).await {
+        Ok(Some(user)) => Ok(util::reply_with_value(&user, StatusCode::OK)),
+        Ok(None) => Ok(util::reply_empty(StatusCode::NOT_FOUND)),
+        Err(e) => Ok(util::reply_with_error(
+            &e,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
 pub async fn add_user_to_registry(api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
     info!("Handling: add_user_to_registry");
 
@@ -109,6 +125,36 @@ pub async fn put_card_to_compendium(
     match api.add_or_update_card_in_compendium(body.card).await {
         Ok(AddOrUpdateOperation::Add) => Ok(util::reply_empty(StatusCode::CREATED)),
         Ok(AddOrUpdateOperation::Update) => Ok(util::reply_empty(StatusCode::OK)),
+        Err(e) => Ok(util::reply_with_error(
+            &e,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+pub async fn list_users_from_registry(api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
+    info!("Handling: list_users_from_registry");
+
+    match api.get_user_ids().await {
+        Ok(user_ids) => Ok(util::reply_with_value(
+            &schemas::ListUsersFromRegistryResponse::from(user_ids),
+            StatusCode::OK,
+        )),
+        Err(e) => Ok(util::reply_with_error(
+            &e,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+pub async fn list_cards_from_compendium(api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
+    info!("Handling: list_cards_from_compendium");
+
+    match api.get_card_ids().await {
+        Ok(card_ids) => Ok(util::reply_with_value(
+            &schemas::ListCardsFromCompendiumResponse::from(card_ids),
+            StatusCode::OK,
+        )),
         Err(e) => Ok(util::reply_with_error(
             &e,
             StatusCode::INTERNAL_SERVER_ERROR,

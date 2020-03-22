@@ -19,6 +19,16 @@ pub fn build_routes(
         .and(warp::get())
         .and_then(health_handlers::version);
 
+    let list_users_from_registry = warp::path!("users")
+        .and(warp::get())
+        .and(with_engine_api(Arc::clone(&api)))
+        .and_then(engine_handlers::list_users_from_registry);
+
+    let get_user_from_registry = warp::path!("users" / Uuid)
+        .and(warp::get())
+        .and(with_engine_api(Arc::clone(&api)))
+        .and_then(engine_handlers::get_user_from_registry);
+
     let add_user_to_registry = warp::path!("users" / "new")
         .and(warp::post())
         .and(with_engine_api(Arc::clone(&api)))
@@ -29,6 +39,11 @@ pub fn build_routes(
         .and(with_engine_api(Arc::clone(&api)))
         .and(with_json_from_body())
         .and_then(engine_handlers::add_card_to_user);
+
+    let list_cards_from_compendium = warp::path!("compendium")
+        .and(warp::get())
+        .and(with_engine_api(Arc::clone(&api)))
+        .and_then(engine_handlers::list_cards_from_compendium);
 
     let get_random_card_from_compendium = warp::path!("compendium" / "random")
         .and(warp::get())
@@ -47,8 +62,11 @@ pub fn build_routes(
         .and_then(engine_handlers::put_card_to_compendium);
 
     ping.or(version)
+        .or(list_users_from_registry)
+        .or(get_user_from_registry)
         .or(add_user_to_registry)
         .or(add_card_to_user)
+        .or(list_cards_from_compendium)
         .or(get_random_card_from_compendium)
         .or(get_card_from_compendium)
         .or(put_card_to_compendium)
