@@ -34,11 +34,21 @@ pub fn build_routes(
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::add_user_to_registry);
 
+    let list_cards_for_user = warp::path!("users" / Uuid / "cards")
+        .and(warp::get())
+        .and(with_engine_api(Arc::clone(&api)))
+        .and_then(engine_handlers::list_cards_for_user);
+
     let add_card_to_user = warp::path!("users" / Uuid / "cards" / "add")
         .and(warp::post())
         .and(with_engine_api(Arc::clone(&api)))
         .and(with_json_from_body())
         .and_then(engine_handlers::add_card_to_user);
+
+    let claim_daily_for_user = warp::path!("users" / Uuid / "daily")
+        .and(warp::post())
+        .and(with_engine_api(Arc::clone(&api)))
+        .and_then(engine_handlers::claim_daily_for_user);
 
     let list_cards_from_compendium = warp::path!("compendium")
         .and(warp::get())
@@ -65,7 +75,9 @@ pub fn build_routes(
         .or(list_users_from_registry)
         .or(get_user_from_registry)
         .or(add_user_to_registry)
+        .or(list_cards_for_user)
         .or(add_card_to_user)
+        .or(claim_daily_for_user)
         .or(list_cards_from_compendium)
         .or(get_random_card_from_compendium)
         .or(get_card_from_compendium)

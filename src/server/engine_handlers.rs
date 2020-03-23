@@ -4,6 +4,7 @@ use crate::engine;
 use crate::models;
 
 use engine::api::AddOrUpdateOperation;
+use engine::{ErrorCategory, ErrorCode};
 use models::{CompendiumError, CompendiumReadError};
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -91,6 +92,34 @@ pub async fn add_card_to_user(
     }
 }
 
+pub async fn claim_daily_for_user(
+    user_id: Uuid,
+    api: Arc<engine::Api>,
+) -> Result<impl Reply, Infallible> {
+    info!("Handling: claim_daily_for_user");
+
+    match api.claim_daily_for_user(user_id).await {
+        Ok(new_currency) => Ok(util::reply_with_value(
+            &schemas::ClaimDailyForUserResponse {
+                user_id: user_id,
+                currency: new_currency,
+            },
+            StatusCode::OK,
+        )),
+        Err(e) => {
+            if let ErrorCode::DailyAlreadyClaimed = e.code {
+                Ok(util::reply_with_error(&e, StatusCode::CONFLICT))
+            } else {
+                let code = match e.classify() {
+                    ErrorCategory::BadRequest => StatusCode::BAD_REQUEST,
+                    _ => StatusCode::INTERNAL_SERVER_ERROR,
+                };
+                Ok(util::reply_with_error(&e, code))
+            }
+        }
+    }
+}
+
 pub async fn get_card_from_compendium(
     id: Uuid,
     api: Arc<engine::Api>,
@@ -159,5 +188,23 @@ pub async fn list_cards_from_compendium(api: Arc<engine::Api>) -> Result<impl Re
             &e,
             StatusCode::INTERNAL_SERVER_ERROR,
         )),
+    }
+}
+
+pub async fn list_cards_for_user(user_id: Uuid, api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
+    info!("Handling: list_cards_for_user");
+
+    match api.get_owned_card_ids(user_id).await {
+        Ok(card_ids) => Ok(util::reply_with_value(
+            &schemas::ListCardsForUserResponse::from(card_ids),
+            StatusCode::OK,
+        )),
+        Err(e) => {
+            let code = match e.classify() {
+                ErrorCategory::BadRequest => StatusCode::BAD_REQUEST,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            Ok(util::reply_with_error(&e, code))
+        }
     }
 }

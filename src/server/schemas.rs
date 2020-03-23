@@ -13,6 +13,14 @@ pub struct PutCardToCompendiumRequest {
     pub card: models::Card,
 }
 
+#[derive(Serialize)]
+pub struct ClaimDailyForUserResponse {
+    pub user_id: Uuid,
+    pub currency: u32,
+}
+
 pub type ListUsersFromRegistryResponse = Vec<Uuid>;
 
 pub type ListCardsFromCompendiumResponse = Vec<Uuid>;
+
+pub type ListCardsForUserResponse = Vec<Uuid>;

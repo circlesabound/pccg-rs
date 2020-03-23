@@ -12,7 +12,9 @@ pub struct UserRegistry {
 }
 
 impl UserRegistry {
-    pub async fn from_storage<T: 'static>(storage: Arc<T>) -> Result<UserRegistry, Box<dyn Error>>
+    pub async fn from_storage<T: 'static>(
+        storage: Arc<T>,
+    ) -> Result<UserRegistry, UserRegistryError>
     where
         T: StorageDriver<User, Item = User>,
     {
@@ -24,9 +26,7 @@ impl UserRegistry {
                         "Detected duplicate user with id '{}' when loading UserRegistry",
                         user.id
                     );
-                    return Err(Box::new(UserRegistryError::DataIntegrity(
-                        UserRegistryDataIntegrityError::DuplicateId(user.id),
-                    )));
+                    return Err(UserRegistryError::DuplicateId(user.id));
                 }
                 Vacant(v) => v.insert(user),
             };
@@ -41,50 +41,78 @@ impl UserRegistry {
 
     pub async fn add_user(&self, user: User) -> Result<(), UserRegistryError> {
         match self.current.entry(user.id) {
-            Occupied(_) => Err(UserRegistryWriteError::Conflict.into()),
+            Occupied(_) => Err(UserRegistryError::Conflict),
             Vacant(v) => {
                 let user_ref = v.insert(user);
                 let user = user_ref.value();
                 match self.storage.write(&user.id, &user) {
                     Ok(_) => Ok(()),
-                    Err(e) => Err(UserRegistryWriteError::Storage(e).into()),
+                    Err(e) => Err(UserRegistryError::Storage(e)),
                 }
             }
         }
     }
 
-    pub async fn add_card_to_user(
+    pub async fn mutate_user_if<T, P, F>(
         &self,
         user_id: Uuid,
-        card_id: Uuid,
-    ) -> Result<(), UserRegistryError> {
+        precondition: P,
+        f: F,
+    ) -> Result<T, UserRegistryError>
+    where
+        P: Fn(&User) -> bool,
+        F: Fn(&mut User) -> Result<T, Box<dyn Error>>,
+    {
         match self.current.entry(user_id) {
-            Vacant(_) => Err(UserRegistryWriteError::NotFound.into()),
+            Vacant(_) => Err(UserRegistryError::NotFound),
             Occupied(mut o) => {
-                // Clone and mutate
-                let mut new = o.get().clone();
-                new.cards.push(card_id);
+                // Check precondition
+                let entry_ref = o.get();
+                if !precondition(entry_ref) {
+                    // Failed precondition, return early
+                    return Err(UserRegistryError::FailedPrecondition);
+                }
 
-                // Persist to storage
-                match self.storage.write(&new.id, &new) {
-                    Ok(_) => {
+                // Clone the object to work on
+                let mut clone = entry_ref.clone();
+
+                // Try mutate the clone
+                match f(&mut clone) {
+                    Ok(ret) => {
+                        // Persist to storage
+                        if let Err(e) = self.storage.write(&clone.id, &clone) {
+                            return Err(UserRegistryError::Storage(e));
+                        }
+
                         // Reflect in-memory
-                        o.insert(new);
-                        Ok(())
+                        o.insert(clone);
+                        Ok(ret)
                     }
-                    Err(e) => Err(UserRegistryWriteError::Storage(e).into()),
+                    Err(e) => Err(UserRegistryError::ExternalOperation(e)),
                 }
             }
         }
+    }
+
+    pub async fn mutate_user_with<T, F>(&self, user_id: Uuid, f: F) -> Result<T, UserRegistryError>
+    where
+        F: Fn(&mut User) -> Result<T, Box<dyn Error>>,
+    {
+        self.mutate_user_if(user_id, |_| true, f).await
     }
 }
 
 #[derive(Debug)]
 pub enum UserRegistryError {
-    DataIntegrity(UserRegistryDataIntegrityError),
-    Write(UserRegistryWriteError),
+    Conflict,
+    DuplicateId(Uuid),
+    FailedPrecondition,
+    ExternalOperation(Box<dyn Error>),
+    NotFound,
+    Storage(storage::Error),
 }
 
+// TODO? fn source
 impl std::error::Error for UserRegistryError {}
 
 impl std::fmt::Display for UserRegistryError {
@@ -97,26 +125,8 @@ impl std::fmt::Display for UserRegistryError {
     }
 }
 
-impl From<UserRegistryWriteError> for UserRegistryError {
-    fn from(e: UserRegistryWriteError) -> Self {
-        UserRegistryError::Write(e)
+impl From<storage::Error> for UserRegistryError {
+    fn from(e: storage::Error) -> Self {
+        UserRegistryError::Storage(e)
     }
-}
-
-impl From<UserRegistryDataIntegrityError> for UserRegistryError {
-    fn from(e: UserRegistryDataIntegrityError) -> Self {
-        UserRegistryError::DataIntegrity(e)
-    }
-}
-
-#[derive(Debug)]
-pub enum UserRegistryDataIntegrityError {
-    DuplicateId(Uuid),
-}
-
-#[derive(Debug)]
-pub enum UserRegistryWriteError {
-    Conflict,
-    NotFound,
-    Storage(storage::Error),
 }
