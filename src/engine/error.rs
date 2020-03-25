@@ -49,11 +49,15 @@ impl error::Error for Error {
     }
 }
 
-// impl From<CompendiumError> for Error {
-//     fn from(e: CompendiumError) -> Self {
-//         unimplemented!()
-//     }
-// }
+impl From<CompendiumError> for Error {
+    fn from(e: CompendiumError) -> Self {
+        match e {
+            CompendiumError::NotFound => Error::new(ErrorCode::CardNotFound, Some(e.into())),
+            CompendiumError::Storage(_) => Error::new(ErrorCode::Storage, Some(e.into())),
+            _ => Error::new(ErrorCode::Other, Some(e.into())),
+        }
+    }
+}
 
 impl From<UserRegistryError> for Error {
     fn from(e: UserRegistryError) -> Self {
@@ -86,6 +90,12 @@ impl error::Error for ErrorSource {
             ErrorSource::Compendium(e) => Some(e),
             ErrorSource::UserRegistry(e) => Some(e),
         }
+    }
+}
+
+impl From<CompendiumError> for ErrorSource {
+    fn from(e: CompendiumError) -> Self {
+        ErrorSource::Compendium(e)
     }
 }
 

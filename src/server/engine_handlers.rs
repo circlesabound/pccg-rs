@@ -5,7 +5,6 @@ use crate::models;
 
 use engine::api::AddOrUpdateOperation;
 use engine::{ErrorCategory, ErrorCode};
-use models::{CompendiumError, CompendiumReadError};
 use std::convert::Infallible;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -73,22 +72,7 @@ pub async fn add_card_to_user(
 
     match api.add_card_to_user(user_id, body.card_id).await {
         Ok(_) => Ok(util::reply_empty(StatusCode::OK)),
-        Err(e) => {
-            if let Some(compendium_error) = e.downcast_ref::<CompendiumError>() {
-                if let CompendiumError::Read(CompendiumReadError::CardNotFound(_)) =
-                    compendium_error
-                {
-                    return Ok(util::reply_with_error(
-                        &compendium_error,
-                        StatusCode::BAD_REQUEST,
-                    ));
-                }
-            }
-            Ok(util::reply_with_error(
-                &e,
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ))
-        }
+        Err(e) => Ok(util::reply_with_error(&e, get_http_code(&e))),
     }
 }
 
@@ -110,11 +94,7 @@ pub async fn claim_daily_for_user(
             if let ErrorCode::DailyAlreadyClaimed = e.code {
                 Ok(util::reply_with_error(&e, StatusCode::CONFLICT))
             } else {
-                let code = match e.classify() {
-                    ErrorCategory::BadRequest => StatusCode::BAD_REQUEST,
-                    _ => StatusCode::INTERNAL_SERVER_ERROR,
-                };
-                Ok(util::reply_with_error(&e, code))
+                Ok(util::reply_with_error(&e, get_http_code(&e)))
             }
         }
     }
@@ -202,12 +182,13 @@ pub async fn list_cards_for_user(
             &schemas::ListCardsForUserResponse::from(card_ids),
             StatusCode::OK,
         )),
-        Err(e) => {
-            let code = match e.classify() {
-                ErrorCategory::BadRequest => StatusCode::BAD_REQUEST,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            };
-            Ok(util::reply_with_error(&e, code))
-        }
+        Err(e) => Ok(util::reply_with_error(&e, get_http_code(&e))),
+    }
+}
+
+fn get_http_code(error: &engine::Error) -> http::StatusCode {
+    match error.classify() {
+        ErrorCategory::BadRequest => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

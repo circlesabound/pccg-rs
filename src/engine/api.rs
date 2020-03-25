@@ -1,7 +1,5 @@
 use crate::engine;
-use crate::models::{
-    Card, Compendium, CompendiumError, CompendiumReadError, User, UserRegistry, UserRegistryError,
-};
+use crate::models::{Card, Compendium, CompendiumError, User, UserRegistry, UserRegistryError};
 
 use chrono::Utc;
 use dashmap::mapref::entry::Entry::*;
@@ -24,24 +22,18 @@ impl Api {
         }
     }
 
-    pub async fn add_new_user(&self, id: Uuid) -> Result<(), Box<dyn error::Error>> {
+    pub async fn add_new_user(&self, id: Uuid) -> engine::Result<()> {
         let user = User::new(id);
         match self.user_registry.add_user(user).await {
             Ok(_) => Ok(()),
-            Err(e) => Err(Box::new(e)),
+            Err(e) => Err(e.into()),
         }
     }
 
-    pub async fn add_card_to_user(
-        &self,
-        user_id: Uuid,
-        card_id: Uuid,
-    ) -> Result<(), Box<dyn error::Error>> {
+    pub async fn add_card_to_user(&self, user_id: Uuid, card_id: Uuid) -> engine::Result<()> {
         // Check card exists
         match self.compendium.current.entry(card_id) {
-            Vacant(_) => Err(Box::new(CompendiumError::Read(
-                CompendiumReadError::CardNotFound(card_id),
-            ))),
+            Vacant(_) => Err(CompendiumError::NotFound.into()),
             Occupied(_o) => {
                 match self
                     .user_registry
@@ -49,7 +41,7 @@ impl Api {
                     .await
                 {
                     Ok(_) => Ok(()),
-                    Err(e) => Err(Box::new(e)),
+                    Err(e) => Err(e.into()),
                 }
             }
         }
@@ -57,7 +49,7 @@ impl Api {
 
     pub async fn get_owned_card_ids(&self, user_id: Uuid) -> engine::Result<Vec<Uuid>> {
         match self.user_registry.current.entry(user_id) {
-            Vacant(_) => Err(engine::Error::new(engine::ErrorCode::UserNotFound, None)),
+            Vacant(_) => Err(UserRegistryError::NotFound.into()),
             Occupied(o) => Ok(o.get().cards.clone()),
         }
     }
@@ -90,7 +82,7 @@ impl Api {
         }
     }
 
-    pub async fn get_user_ids(&self) -> Result<Vec<Uuid>, Infallible> {
+    pub async fn get_user_ids(&self) -> engine::Result<Vec<Uuid>> {
         Ok(self
             .user_registry
             .current
@@ -99,11 +91,11 @@ impl Api {
             .collect())
     }
 
-    pub async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>, Box<dyn error::Error>> {
+    pub async fn get_user_by_id(&self, id: Uuid) -> engine::Result<Option<User>> {
         Ok(self.user_registry.current.get(&id).map(|u| u.clone()))
     }
 
-    pub async fn get_random_card(&self) -> Result<Option<Card>, Box<dyn error::Error>> {
+    pub async fn get_random_card(&self) -> engine::Result<Option<Card>> {
         let cards = Arc::clone(&self.compendium.current);
         if cards.is_empty() {
             return Ok(None);
@@ -124,7 +116,7 @@ impl Api {
         ret
     }
 
-    pub async fn get_card_ids(&self) -> Result<Vec<Uuid>, Infallible> {
+    pub async fn get_card_ids(&self) -> engine::Result<Vec<Uuid>> {
         Ok(self
             .compendium
             .current
@@ -133,18 +125,18 @@ impl Api {
             .collect())
     }
 
-    pub async fn get_card_by_id(&self, id: Uuid) -> Result<Option<Card>, Box<dyn error::Error>> {
+    pub async fn get_card_by_id(&self, id: Uuid) -> engine::Result<Option<Card>> {
         Ok(self.compendium.current.get(&id).map(|c| c.clone()))
     }
 
     pub async fn add_or_update_card_in_compendium(
         &self,
         card: Card,
-    ) -> Result<AddOrUpdateOperation, Box<dyn error::Error>> {
+    ) -> engine::Result<AddOrUpdateOperation> {
         match self.compendium.upsert_card(card).await {
             Ok(None) => Ok(AddOrUpdateOperation::Add),
             Ok(Some(_)) => Ok(AddOrUpdateOperation::Update),
-            Err(e) => Err(Box::new(e)),
+            Err(e) => Err(e.into()),
         }
     }
 }
@@ -177,15 +169,19 @@ mod tests {
             .take(20)
             .map(|_| {
                 let api = Arc::clone(&api);
-                tokio::spawn(async move {
-                    api.claim_daily_for_user(user_id).await.is_ok()
-                }
-            )})
+                tokio::spawn(async move { api.claim_daily_for_user(user_id).await.is_ok() })
+            })
             .collect();
 
         // Await all 20 tasks, assert that only 1 succeeded
         let completed_tasks = future::join_all(tasks).await;
-        assert_eq!(completed_tasks.iter().filter(|b| *b.as_ref().unwrap()).count(), 1);
+        assert_eq!(
+            completed_tasks
+                .iter()
+                .filter(|b| *b.as_ref().unwrap())
+                .count(),
+            1
+        );
 
         // Fetch the updated currency amount, assert that it only increased once
         let user = api.get_user_by_id(user_id).await.unwrap().unwrap();
@@ -194,8 +190,12 @@ mod tests {
     }
 
     async fn new_in_memory_api() -> Api {
-        let compendium = Compendium::from_storage(Arc::new(InMemoryStore::new().unwrap())).await.unwrap();
-        let user_registry = UserRegistry::from_storage(Arc::new(InMemoryStore::new().unwrap())).await.unwrap();
+        let compendium = Compendium::from_storage(Arc::new(InMemoryStore::new().unwrap()))
+            .await
+            .unwrap();
+        let user_registry = UserRegistry::from_storage(Arc::new(InMemoryStore::new().unwrap()))
+            .await
+            .unwrap();
         Api::new(compendium, user_registry).await
     }
 }

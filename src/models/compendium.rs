@@ -2,7 +2,6 @@ use crate::models::Card;
 use crate::storage::{self, StorageDriver};
 use dashmap::mapref::entry::Entry::*;
 use dashmap::DashMap;
-use std::error::Error;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -12,7 +11,7 @@ pub struct Compendium {
 }
 
 impl Compendium {
-    pub async fn from_storage<T: 'static>(storage: Arc<T>) -> Result<Compendium, Box<dyn Error>>
+    pub async fn from_storage<T: 'static>(storage: Arc<T>) -> Result<Compendium, CompendiumError>
     where
         T: StorageDriver<Card, Item = Card>,
     {
@@ -24,9 +23,7 @@ impl Compendium {
                         "Detected duplicate card with id '{}' when loading Compendium",
                         card.id
                     );
-                    return Err(Box::new(CompendiumError::DataIntegrity(
-                        CompendiumDataIntegrityError::DuplicateId(card.id),
-                    )));
+                    return Err(CompendiumError::DuplicateId(card.id));
                 }
                 Vacant(v) => v.insert(card),
             };
@@ -50,7 +47,7 @@ impl Compendium {
                 let old_card = o.get().clone();
                 let ret = match self.storage.write(&card.id, &card) {
                     Ok(_) => Ok(Some(old_card)),
-                    Err(e) => Err(CompendiumWriteError::Storage(e).into()),
+                    Err(e) => Err(e.into()),
                 };
                 o.insert(card);
                 ret
@@ -58,7 +55,7 @@ impl Compendium {
             Vacant(v) => {
                 let ret = match self.storage.write(&card.id, &card) {
                     Ok(_) => Ok(None),
-                    Err(e) => Err(CompendiumWriteError::Storage(e).into()),
+                    Err(e) => Err(e.into()),
                 };
                 v.insert(card);
                 ret
@@ -69,9 +66,9 @@ impl Compendium {
 
 #[derive(Debug)]
 pub enum CompendiumError {
-    DataIntegrity(CompendiumDataIntegrityError),
-    Read(CompendiumReadError),
-    Write(CompendiumWriteError),
+    DuplicateId(Uuid),
+    NotFound,
+    Storage(storage::Error),
 }
 
 impl std::error::Error for CompendiumError {}
@@ -86,35 +83,8 @@ impl std::fmt::Display for CompendiumError {
     }
 }
 
-impl From<CompendiumDataIntegrityError> for CompendiumError {
-    fn from(e: CompendiumDataIntegrityError) -> Self {
-        CompendiumError::DataIntegrity(e)
+impl From<storage::Error> for CompendiumError {
+    fn from(e: storage::Error) -> Self {
+        CompendiumError::Storage(e)
     }
-}
-
-impl From<CompendiumReadError> for CompendiumError {
-    fn from(e: CompendiumReadError) -> Self {
-        CompendiumError::Read(e)
-    }
-}
-
-impl From<CompendiumWriteError> for CompendiumError {
-    fn from(e: CompendiumWriteError) -> Self {
-        CompendiumError::Write(e)
-    }
-}
-
-#[derive(Debug)]
-pub enum CompendiumDataIntegrityError {
-    DuplicateId(uuid::Uuid),
-}
-
-#[derive(Debug)]
-pub enum CompendiumReadError {
-    CardNotFound(uuid::Uuid),
-}
-
-#[derive(Debug)]
-pub enum CompendiumWriteError {
-    Storage(storage::Error),
 }
