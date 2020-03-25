@@ -4,8 +4,6 @@ use crate::models::{Card, Compendium, CompendiumError, User, UserRegistry, UserR
 use chrono::Utc;
 use dashmap::mapref::entry::Entry::*;
 use rand::Rng;
-use std::convert::Infallible;
-use std::error;
 use std::sync::Arc;
 use uuid::Uuid;
 
