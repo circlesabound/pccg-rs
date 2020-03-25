@@ -34,8 +34,8 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<serde_json::error::Error> for Error {
-    fn from(value: serde_json::error::Error) -> Self {
+impl From<serde_json::Error> for Error {
+    fn from(value: serde_json::Error) -> Self {
         Error::Serialization(value)
     }
 }

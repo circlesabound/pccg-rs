@@ -58,12 +58,8 @@ impl error::Error for Error {
 impl From<UserRegistryError> for Error {
     fn from(e: UserRegistryError) -> Self {
         match e {
-            UserRegistryError::NotFound => {
-                Error::new(ErrorCode::UserNotFound, Some(e.into()))
-            }
-            UserRegistryError::Storage(_) => {
-                Error::new(ErrorCode::Storage, Some(e.into()))
-            }
+            UserRegistryError::NotFound => Error::new(ErrorCode::UserNotFound, Some(e.into())),
+            UserRegistryError::Storage(_) => Error::new(ErrorCode::Storage, Some(e.into())),
             _ => Error::new(ErrorCode::Other, Some(e.into())),
         }
     }

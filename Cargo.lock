@@ -735,6 +735,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dashmap",
+ "futures",
  "http",
  "log 0.4.8",
  "pretty_env_logger",

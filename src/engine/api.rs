@@ -3,7 +3,7 @@ use crate::models::{
     Card, Compendium, CompendiumError, CompendiumReadError, User, UserRegistry, UserRegistryError,
 };
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::Utc;
 use dashmap::mapref::entry::Entry::*;
 use rand::Rng;
 use std::convert::Infallible;
@@ -55,18 +55,10 @@ impl Api {
         }
     }
 
-    pub async fn get_owned_card_ids(
-        &self,
-        user_id: Uuid
-    ) -> engine::Result<Vec<Uuid>> {
+    pub async fn get_owned_card_ids(&self, user_id: Uuid) -> engine::Result<Vec<Uuid>> {
         match self.user_registry.current.entry(user_id) {
-            Vacant(_) => Err(engine::Error::new(
-                engine::ErrorCode::UserNotFound,
-                None
-            )),
-            Occupied(o) => {
-                Ok(o.get().cards.clone())
-            }
+            Vacant(_) => Err(engine::Error::new(engine::ErrorCode::UserNotFound, None)),
+            Occupied(o) => Ok(o.get().cards.clone()),
         }
     }
 
@@ -160,4 +152,50 @@ impl Api {
 pub enum AddOrUpdateOperation {
     Add,
     Update,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::memory::InMemoryStore;
+    use futures::future;
+
+    #[tokio::test]
+    async fn claim_daily_increases_currency_only_once() {
+        let api = Arc::new(new_in_memory_api().await);
+
+        // Add a new user
+        let user_id = Uuid::new_v4();
+        api.add_new_user(user_id).await.unwrap();
+
+        // Save the starting currency amount
+        let user = api.get_user_by_id(user_id).await.unwrap().unwrap();
+        let starting_currency = user.currency;
+
+        // Spawn 20 tasks to claim daily
+        let tasks: Vec<_> = std::iter::repeat(())
+            .take(20)
+            .map(|_| {
+                let api = Arc::clone(&api);
+                tokio::spawn(async move {
+                    api.claim_daily_for_user(user_id).await.is_ok()
+                }
+            )})
+            .collect();
+
+        // Await all 20 tasks, assert that only 1 succeeded
+        let completed_tasks = future::join_all(tasks).await;
+        assert_eq!(completed_tasks.iter().filter(|b| *b.as_ref().unwrap()).count(), 1);
+
+        // Fetch the updated currency amount, assert that it only increased once
+        let user = api.get_user_by_id(user_id).await.unwrap().unwrap();
+        assert!(user.currency > starting_currency);
+        assert_eq!(user.currency - starting_currency, 200);
+    }
+
+    async fn new_in_memory_api() -> Api {
+        let compendium = Compendium::from_storage(Arc::new(InMemoryStore::new().unwrap())).await.unwrap();
+        let user_registry = UserRegistry::from_storage(Arc::new(InMemoryStore::new().unwrap())).await.unwrap();
+        Api::new(compendium, user_registry).await
+    }
 }

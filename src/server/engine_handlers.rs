@@ -191,7 +191,10 @@ pub async fn list_cards_from_compendium(api: Arc<engine::Api>) -> Result<impl Re
     }
 }
 
-pub async fn list_cards_for_user(user_id: Uuid, api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
+pub async fn list_cards_for_user(
+    user_id: Uuid,
+    api: Arc<engine::Api>,
+) -> Result<impl Reply, Infallible> {
     info!("Handling: list_cards_for_user");
 
     match api.get_owned_card_ids(user_id).await {

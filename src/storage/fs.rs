@@ -1,6 +1,5 @@
-use super::StorageDriver;
-use crate::storage;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use crate::storage::{self, StorageDriver};
+use serde::{de::DeserializeOwned, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -12,8 +11,10 @@ pub struct FsStore<T> {
 
 impl<T> FsStore<T> {
     pub fn new<P: Into<PathBuf>>(dirname: P) -> storage::Result<FsStore<T>> {
+        let path = dirname.into();
+        fs::create_dir_all(&path)?;
         Ok(FsStore {
-            dirname: PathBuf::from(dirname.into()),
+            dirname: PathBuf::from(path),
             _item_type: std::marker::PhantomData,
         })
     }
@@ -55,8 +56,10 @@ impl<T: DeserializeOwned + Serialize + Send + Sync> StorageDriver<T> for FsStore
     }
 }
 
-mod test {
+#[cfg(test)]
+mod tests {
     use super::*;
+    use serde::Deserialize;
 
     #[derive(Debug, PartialEq, Deserialize, Serialize)]
     struct MockItem {

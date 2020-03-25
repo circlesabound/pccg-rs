@@ -79,6 +79,11 @@ impl UserRegistry {
                 // Try mutate the clone
                 match f(&mut clone) {
                     Ok(ret) => {
+                        // Check ID was not modified
+                        if clone.id != entry_ref.id {
+                            return Err(UserRegistryError::ExternalOperationModifiedId);
+                        }
+
                         // Persist to storage
                         if let Err(e) = self.storage.write(&clone.id, &clone) {
                             return Err(UserRegistryError::Storage(e));
@@ -88,7 +93,7 @@ impl UserRegistry {
                         o.insert(clone);
                         Ok(ret)
                     }
-                    Err(e) => Err(UserRegistryError::ExternalOperation(e)),
+                    Err(e) => Err(UserRegistryError::ExternalOperationFailed(e)),
                 }
             }
         }
@@ -107,7 +112,8 @@ pub enum UserRegistryError {
     Conflict,
     DuplicateId(Uuid),
     FailedPrecondition,
-    ExternalOperation(Box<dyn Error>),
+    ExternalOperationFailed(Box<dyn Error>),
+    ExternalOperationModifiedId,
     NotFound,
     Storage(storage::Error),
 }
