@@ -55,7 +55,7 @@ impl UserRegistry {
 
     pub async fn mutate_user_if<T, P, F>(
         &self,
-        user_id: Uuid,
+        user_id: &Uuid,
         precondition: P,
         f: F,
     ) -> Result<T, UserRegistryError>
@@ -63,7 +63,7 @@ impl UserRegistry {
         P: Fn(&User) -> bool,
         F: Fn(&mut User) -> Result<T, Box<dyn Error>>,
     {
-        match self.current.entry(user_id) {
+        match self.current.entry(*user_id) {
             Vacant(_) => Err(UserRegistryError::NotFound),
             Occupied(mut o) => {
                 // Check precondition
@@ -99,7 +99,7 @@ impl UserRegistry {
         }
     }
 
-    pub async fn mutate_user_with<T, F>(&self, user_id: Uuid, f: F) -> Result<T, UserRegistryError>
+    pub async fn mutate_user_with<T, F>(&self, user_id: &Uuid, f: F) -> Result<T, UserRegistryError>
     where
         F: Fn(&mut User) -> Result<T, Box<dyn Error>>,
     {

@@ -55,10 +55,10 @@ pub fn build_routes(
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::list_cards_from_compendium);
 
-    let get_random_card_from_compendium = warp::path!("compendium" / "random")
+    let draw_card_for_user = warp::path!("users" / Uuid / "draw")
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
-        .and_then(engine_handlers::get_random_card_from_compendium);
+        .and_then(engine_handlers::draw_card_for_user);
 
     let get_card_from_compendium = warp::path!("compendium" / Uuid)
         .and(warp::get())
@@ -78,8 +78,8 @@ pub fn build_routes(
         .or(list_cards_for_user)
         .or(add_card_to_user)
         .or(claim_daily_for_user)
+        .or(draw_card_for_user)
         .or(list_cards_from_compendium)
-        .or(get_random_card_from_compendium)
         .or(get_card_from_compendium)
         .or(put_card_to_compendium)
         .with(logging::log_incoming_request())

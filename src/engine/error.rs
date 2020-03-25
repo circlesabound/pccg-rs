@@ -14,10 +14,11 @@ pub struct Error {
 #[derive(Debug)]
 pub enum ErrorCode {
     CardNotFound,
-    UserNotFound,
+    CompendiumEmpty,
     DailyAlreadyClaimed,
     Other,
     Storage,
+    UserNotFound,
 }
 
 impl Error {
@@ -28,7 +29,9 @@ impl Error {
     pub fn classify(&self) -> ErrorCategory {
         match self.code {
             ErrorCode::CardNotFound | ErrorCode::UserNotFound => ErrorCategory::BadRequest,
-            ErrorCode::Other | ErrorCode::Storage => ErrorCategory::Internal,
+            ErrorCode::CompendiumEmpty | ErrorCode::Other | ErrorCode::Storage => {
+                ErrorCategory::Internal
+            }
             ErrorCode::DailyAlreadyClaimed => ErrorCategory::FailedPrecondition,
         }
     }

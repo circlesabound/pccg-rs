@@ -10,28 +10,25 @@ use uuid::Uuid;
 use warp::http::StatusCode;
 use warp::Reply;
 
-pub async fn get_random_card_from_compendium(
+pub async fn draw_card_for_user(
+    user_id: Uuid,
     api: Arc<engine::Api>,
 ) -> Result<impl Reply, Infallible> {
-    info!("Handling: get_random_card_from_compendium");
+    info!("Handling: draw_card_for_user");
 
-    match api.get_random_card().await {
-        Ok(Some(card)) => Ok(util::reply_with_value(&card, StatusCode::OK)),
-        Ok(None) => Ok(util::reply_empty(StatusCode::NO_CONTENT)),
-        Err(e) => Ok(util::reply_with_error(
-            &e,
-            StatusCode::INTERNAL_SERVER_ERROR,
-        )),
+    match api.add_random_card_to_user(&user_id).await {
+        Ok(card) => Ok(util::reply_with_value(&card, StatusCode::OK)),
+        Err(e) => Ok(util::reply_with_error(&e, get_http_code(&e))),
     }
 }
 
 pub async fn get_user_from_registry(
-    id: Uuid,
+    user_id: Uuid,
     api: Arc<engine::Api>,
 ) -> Result<impl Reply, Infallible> {
     info!("Handling: get_user_from_registry");
 
-    match api.get_user_by_id(id).await {
+    match api.get_user_by_id(&user_id).await {
         Ok(Some(user)) => Ok(util::reply_with_value(&user, StatusCode::OK)),
         Ok(None) => Ok(util::reply_empty(StatusCode::NOT_FOUND)),
         Err(e) => Ok(util::reply_with_error(
@@ -44,9 +41,9 @@ pub async fn get_user_from_registry(
 pub async fn add_user_to_registry(api: Arc<engine::Api>) -> Result<impl Reply, Infallible> {
     info!("Handling: add_user_to_registry");
 
-    let id = uuid::Uuid::new_v4();
-    match api.add_new_user(id).await {
-        Ok(_) => Ok(util::reply_with_value(&id, StatusCode::CREATED)),
+    let user_id = uuid::Uuid::new_v4();
+    match api.add_new_user(&user_id).await {
+        Ok(_) => Ok(util::reply_with_value(&user_id, StatusCode::CREATED)),
         Err(e) => Ok(util::reply_with_error(
             &e,
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -69,7 +66,7 @@ pub async fn add_card_to_user(
         ));
     }
 
-    match api.add_card_to_user(user_id, body.card_id).await {
+    match api.add_card_to_user(&user_id, &body.card_id).await {
         Ok(_) => Ok(util::reply_empty(StatusCode::OK)),
         Err(e) => Ok(util::reply_with_error(&e, get_http_code(&e))),
     }
@@ -81,7 +78,7 @@ pub async fn claim_daily_for_user(
 ) -> Result<impl Reply, Infallible> {
     info!("Handling: claim_daily_for_user");
 
-    match api.claim_daily_for_user(user_id).await {
+    match api.claim_daily_for_user(&user_id).await {
         Ok(new_currency) => Ok(util::reply_with_value(
             &schemas::ClaimDailyForUserResponse {
                 user_id: user_id,
@@ -100,12 +97,12 @@ pub async fn claim_daily_for_user(
 }
 
 pub async fn get_card_from_compendium(
-    id: Uuid,
+    card_id: Uuid,
     api: Arc<engine::Api>,
 ) -> Result<impl Reply, Infallible> {
     info!("Handling: get_card_from_compendium");
 
-    match api.get_card_by_id(id).await {
+    match api.get_card_by_id(&card_id).await {
         Ok(Some(card)) => Ok(util::reply_with_value(&card, StatusCode::OK)),
         Ok(None) => Ok(util::reply_empty(StatusCode::NOT_FOUND)),
         Err(e) => Ok(util::reply_with_error(
@@ -116,14 +113,14 @@ pub async fn get_card_from_compendium(
 }
 
 pub async fn put_card_to_compendium(
-    id: Uuid,
+    card_id: Uuid,
     api: Arc<engine::Api>,
     body: schemas::PutCardToCompendiumRequest,
 ) -> Result<impl Reply, Infallible> {
     info!("Handling: put_card_to_compendium");
 
     // Validate explicit ID parameter matches ID in body
-    if id != body.card.id {
+    if card_id != body.card.id {
         return Ok(util::reply_with_error(
             &"id mismatch",
             StatusCode::BAD_REQUEST,
@@ -176,7 +173,7 @@ pub async fn list_cards_for_user(
 ) -> Result<impl Reply, Infallible> {
     info!("Handling: list_cards_for_user");
 
-    match api.get_owned_card_ids(user_id).await {
+    match api.get_owned_card_ids(&user_id).await {
         Ok(card_ids) => Ok(util::reply_with_value(
             &schemas::ListCardsForUserResponse::from(card_ids),
             StatusCode::OK,
