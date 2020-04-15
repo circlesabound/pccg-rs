@@ -48,7 +48,7 @@ impl Api {
 
     pub async fn add_random_card_to_user(&self, user_id: &Uuid) -> engine::Result<Card> {
         // Ugly code to appease compiler send approximation
-        let mut card_id: Option<Uuid> = None;
+        let card_id: Option<Uuid>;
         {
             match self.get_random_card().await {
                 Err(e) => {
@@ -174,41 +174,43 @@ mod tests {
     use crate::storage::memory::InMemoryStore;
     use futures::future;
 
-    #[tokio::test]
+    #[tokio::test(threaded_scheduler)]
     async fn claim_daily_increases_currency_only_once() {
-        let api = Arc::new(new_in_memory_api().await);
+        tokio::spawn(async {
+            let api = Arc::new(new_in_memory_api().await);
 
-        // Add a new user
-        let user_id = Uuid::new_v4();
-        api.add_new_user(&user_id).await.unwrap();
+            // Add a new user
+            let user_id = Uuid::new_v4();
+            api.add_new_user(&user_id).await.unwrap();
 
-        // Save the starting currency amount
-        let user = api.get_user_by_id(&user_id).await.unwrap().unwrap();
-        let starting_currency = user.currency;
+            // Save the starting currency amount
+            let user = api.get_user_by_id(&user_id).await.unwrap().unwrap();
+            let starting_currency = user.currency;
 
-        // Spawn 20 tasks to claim daily
-        let tasks: Vec<_> = std::iter::repeat(())
-            .take(20)
-            .map(|_| {
-                let api = Arc::clone(&api);
-                tokio::spawn(async move { api.claim_daily_for_user(&user_id).await.is_ok() })
-            })
-            .collect();
+            // Spawn 20 tasks to claim daily
+            let tasks: Vec<_> = std::iter::repeat(())
+                .take(20)
+                .map(|_| {
+                    let api = Arc::clone(&api);
+                    tokio::spawn(async move { api.claim_daily_for_user(&user_id).await.is_ok() })
+                })
+                .collect();
 
-        // Await all 20 tasks, assert that only 1 succeeded
-        let completed_tasks = future::join_all(tasks).await;
-        assert_eq!(
-            completed_tasks
-                .iter()
-                .filter(|b| *b.as_ref().unwrap())
-                .count(),
-            1
-        );
+            // Await all 20 tasks, assert that only 1 succeeded
+            let completed_tasks = future::join_all(tasks).await;
+            assert_eq!(
+                completed_tasks
+                    .iter()
+                    .filter(|b| *b.as_ref().unwrap())
+                    .count(),
+                1
+            );
 
-        // Fetch the updated currency amount, assert that it only increased once
-        let user = api.get_user_by_id(&user_id).await.unwrap().unwrap();
-        assert!(user.currency > starting_currency);
-        assert_eq!(user.currency - starting_currency, 200);
+            // Fetch the updated currency amount, assert that it only increased once
+            let user = api.get_user_by_id(&user_id).await.unwrap().unwrap();
+            assert!(user.currency > starting_currency);
+            assert_eq!(user.currency - starting_currency, 200);
+        }).await.unwrap();
     }
 
     async fn new_in_memory_api() -> Api {

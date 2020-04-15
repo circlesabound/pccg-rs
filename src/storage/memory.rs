@@ -18,8 +18,12 @@ impl<T> InMemoryStore<T> {
     }
 }
 
-impl<T: DeserializeOwned + Serialize + Send + Sync> StorageDriver<T> for InMemoryStore<T> {
+impl<T: DeserializeOwned + Serialize + Send + Sync> StorageDriver for InMemoryStore<T> {
     type Item = T;
+
+    fn list_ids(&self) -> storage::Result<Vec<Uuid>> {
+        Ok(self.items.iter().map(|kvp| kvp.key().clone()).collect())
+    }
 
     fn read(&self, id: &Uuid) -> storage::Result<Option<T>> {
         match self.items.get(id) {

@@ -24,8 +24,18 @@ impl<T> FsStore<T> {
     }
 }
 
-impl<T: DeserializeOwned + Serialize + Send + Sync> StorageDriver<T> for FsStore<T> {
+impl<T: DeserializeOwned + Serialize + Send + Sync> StorageDriver for FsStore<T> {
     type Item = T;
+
+    fn list_ids(&self) -> storage::Result<Vec<Uuid>> {
+        let mut ret = vec![];
+        for entry in fs::read_dir(&self.dirname)? {
+            let filename = entry?.path();
+            let filename_no_ext = filename.file_stem().unwrap();
+            ret.push(Uuid::parse_str(filename_no_ext.to_str().unwrap()).unwrap());
+        }
+        Ok(ret)
+    }
 
     fn read(&self, id: &Uuid) -> storage::Result<Option<T>> {
         let path = self.get_filename_from_id(id);

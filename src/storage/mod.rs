@@ -1,6 +1,7 @@
 mod storage_driver;
 pub use self::storage_driver::StorageDriver;
 
+pub mod firestore;
 pub mod fs;
 pub mod memory;
 

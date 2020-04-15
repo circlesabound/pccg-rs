@@ -4,11 +4,12 @@ use dashmap::mapref::entry::Entry::*;
 use dashmap::DashMap;
 use std::error::Error;
 use std::sync::Arc;
+use tokio::task;
 use uuid::Uuid;
 
 pub struct UserRegistry {
     pub current: Arc<DashMap<Uuid, User>>,
-    storage: Arc<dyn StorageDriver<User, Item = User>>,
+    storage: Arc<dyn StorageDriver<Item = User>>,
 }
 
 impl UserRegistry {
@@ -16,10 +17,10 @@ impl UserRegistry {
         storage: Arc<T>,
     ) -> Result<UserRegistry, UserRegistryError>
     where
-        T: StorageDriver<User, Item = User>,
+        T: StorageDriver<Item = User>,
     {
         let users: DashMap<Uuid, User> = DashMap::new();
-        for user in storage.read_all()? {
+        for user in task::block_in_place(|| { storage.read_all() })? {
             match users.entry(user.id) {
                 Occupied(_) => {
                     error!(
@@ -45,7 +46,7 @@ impl UserRegistry {
             Vacant(v) => {
                 let user_ref = v.insert(user);
                 let user = user_ref.value();
-                match self.storage.write(&user.id, &user) {
+                match task::block_in_place(|| { self.storage.write(&user.id, &user) }) {
                     Ok(_) => Ok(()),
                     Err(e) => Err(UserRegistryError::Storage(e)),
                 }
@@ -85,7 +86,7 @@ impl UserRegistry {
                         }
 
                         // Persist to storage
-                        if let Err(e) = self.storage.write(&clone.id, &clone) {
+                        if let Err(e) = task::block_in_place(|| { self.storage.write(&clone.id, &clone) }) {
                             return Err(UserRegistryError::Storage(e));
                         }
 

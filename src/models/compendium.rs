@@ -3,20 +3,21 @@ use crate::storage::{self, StorageDriver};
 use dashmap::mapref::entry::Entry::*;
 use dashmap::DashMap;
 use std::sync::Arc;
+use tokio::task;
 use uuid::Uuid;
 
 pub struct Compendium {
     pub current: Arc<DashMap<Uuid, Card>>,
-    storage: Arc<dyn StorageDriver<Card, Item = Card>>,
+    storage: Arc<dyn StorageDriver<Item = Card>>,
 }
 
 impl Compendium {
     pub async fn from_storage<T: 'static>(storage: Arc<T>) -> Result<Compendium, CompendiumError>
     where
-        T: StorageDriver<Card, Item = Card>,
+        T: StorageDriver<Item = Card>,
     {
         let cards: DashMap<Uuid, Card> = DashMap::new();
-        for card in storage.read_all()? {
+        for card in task::block_in_place(|| { storage.read_all() })? {
             match cards.entry(card.id) {
                 Occupied(_) => {
                     error!(
@@ -45,7 +46,7 @@ impl Compendium {
         match self.current.entry(card.id) {
             Occupied(mut o) => {
                 let old_card = o.get().clone();
-                let ret = match self.storage.write(&card.id, &card) {
+                let ret = match task::block_in_place(|| { self.storage.write(&card.id, &card) }) {
                     Ok(_) => Ok(Some(old_card)),
                     Err(e) => Err(e.into()),
                 };
@@ -53,7 +54,7 @@ impl Compendium {
                 ret
             }
             Vacant(v) => {
-                let ret = match self.storage.write(&card.id, &card) {
+                let ret = match task::block_in_place(|| { self.storage.write(&card.id, &card) }) {
                     Ok(_) => Ok(None),
                     Err(e) => Err(e.into()),
                 };
