@@ -7,3 +7,6 @@ directory = "data/compendium"
 
 [user_registry]
 directory = "data/user_registry"
+
+[firestore]
+secret = "secrets/service_account.json"

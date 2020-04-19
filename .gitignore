@@ -11,3 +11,6 @@
 
 # Data folder specified in dev configuration
 data/
+
+# Secrets
+secrets/
