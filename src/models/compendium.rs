@@ -17,7 +17,7 @@ impl Compendium {
         T: StorageDriver<Item = Card>,
     {
         let cards: DashMap<Uuid, Card> = DashMap::new();
-        for card in task::block_in_place(|| { storage.read_all() })? {
+        for card in task::block_in_place(|| storage.read_all())? {
             match cards.entry(card.id) {
                 Occupied(_) => {
                     error!(
@@ -46,7 +46,7 @@ impl Compendium {
         match self.current.entry(card.id) {
             Occupied(mut o) => {
                 let old_card = o.get().clone();
-                let ret = match task::block_in_place(|| { self.storage.write(&card.id, &card) }) {
+                let ret = match task::block_in_place(|| self.storage.write(&card.id, &card)) {
                     Ok(_) => Ok(Some(old_card)),
                     Err(e) => Err(e.into()),
                 };
@@ -54,7 +54,7 @@ impl Compendium {
                 ret
             }
             Vacant(v) => {
-                let ret = match task::block_in_place(|| { self.storage.write(&card.id, &card) }) {
+                let ret = match task::block_in_place(|| self.storage.write(&card.id, &card)) {
                     Ok(_) => Ok(None),
                     Err(e) => Err(e.into()),
                 };

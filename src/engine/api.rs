@@ -210,7 +210,9 @@ mod tests {
             let user = api.get_user_by_id(&user_id).await.unwrap().unwrap();
             assert!(user.currency > starting_currency);
             assert_eq!(user.currency - starting_currency, 200);
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
     }
 
     async fn new_in_memory_api() -> Api {
