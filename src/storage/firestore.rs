@@ -11,15 +11,18 @@ use std::{
     convert::{TryFrom, TryInto},
     path::PathBuf,
     sync::Arc,
+    time,
 };
-use tokio::fs;
+use tokio::{fs, task, sync::{RwLock, oneshot}, sync::oneshot::error::TryRecvError};
 use uuid::Uuid;
 
 pub(crate) struct Firestore {
     client: Arc<Client<HttpsConnector<HttpConnector>>>,
     firebase_project: String,
     parent_path: String,
-    _oauth_token: String,
+    _oauth_token: Arc<RwLock<String>>,
+    _oauth_refresh_handle: task::JoinHandle<()>,
+    _oauth_refresh_cancellation: oneshot::Sender<()>,
 }
 
 impl Firestore {
@@ -30,25 +33,56 @@ impl Firestore {
         // Create shared HTTP client
         let mut https = HttpsConnector::new();
         https.https_only(true);
-        let client = Client::builder().build::<_, hyper::Body>(https);
+        let client = Arc::new(Client::builder().build::<_, hyper::Body>(https));
 
         // Get OAuth token
         let json_key = read_json_key(json_key_path).await?;
         let jwt = build_jwt(&json_key.client_email, &json_key.private_key).await?;
-        let oauth_token = get_oauth_token(jwt, &client).await?;
+        let (oauth_token, oauth_expires_in) = get_oauth_token(jwt, &client).await?;
+        let oauth_token = Arc::new(RwLock::new(oauth_token));
+        let mut oauth_expires_in: u64 = oauth_expires_in as u64;
+
+        // Start background task to refresh OAuth token
+        let (tx, mut rx) = oneshot::channel();
+        let client_clone = client.clone();
+        let client_email = json_key.client_email.clone();
+        let private_key = json_key.private_key.clone();
+        let oauth_token_clone = oauth_token.clone();
+        let handle = tokio::spawn(async move {
+            while let Err(TryRecvError::Empty) = rx.try_recv() {
+                // Refresh token 10 minutes before expiration
+                // let delay_duration = tokio::time::Duration::from_secs(oauth_expires_in - 600);
+                let delay_duration = tokio::time::Duration::from_secs(5);
+                tokio::time::delay_for(delay_duration).await;
+                if let Err(TryRecvError::Closed) = rx.try_recv() {
+                    debug!("Stopping background task to refresh OAuth token");
+                    break;
+                } else {
+                    debug!("Renewing OAuth token");
+                    let jwt = build_jwt(&client_email, &private_key).await.unwrap();
+                    let ret = get_oauth_token(jwt, &client_clone).await.unwrap();
+                    let mut oauth_token = oauth_token_clone.write().await;
+                    *oauth_token = ret.0;
+                    oauth_expires_in = ret.1 as u64;
+                    debug!("Successfully renewed OAuth token");
+                }
+            }
+        });
 
         Ok(Firestore {
-            client: Arc::new(client),
+            client: client,
             firebase_project: json_key.project_id,
             parent_path,
             _oauth_token: oauth_token,
+            _oauth_refresh_handle: handle,
+            _oauth_refresh_cancellation: tx,
         })
     }
 
     async fn list<T: TryFrom<Document>>(&self) -> storage::Result<Vec<T>> {
-        let mut done = false;
+        let mut ret = vec![];
         let mut next_page_token = None;
-        while !done {
+        while let Some(_) = next_page_token {
             let uri: String;
             if let Some(token) = next_page_token {
                 uri = format!(
@@ -68,25 +102,24 @@ impl Firestore {
                 .header(HeaderName::from_static("accept"), "application/json")
                 .header(
                     HeaderName::from_static("authorization"),
-                    format!("Bearer {}", &self._oauth_token),
+                    format!("Bearer {}", *self._oauth_token.read().await),
                 )
                 .body(Body::empty())
                 .unwrap();
-            info!("GET {}", uri);
+            debug!("GET {}", uri);
             let resp = self.client.request(req).await.unwrap();
             let status = resp.status();
             let body_bytes = body::to_bytes(resp.into_body()).await.unwrap();
-            info!(
+            debug!(
                 "HTTP {} {}",
                 status,
                 String::from_utf8(body_bytes.to_vec()).unwrap(),
             );
+
+            let list_response: ListDocumentsResponse;
             match status {
                 StatusCode::OK => {
-                    let list_response: ListDocumentsResponse = serde_json::from_slice(&body_bytes).unwrap();
-                    next_page_token = list_response.next_page_token;
-                    done = true;
-                    let mut ret = vec![];
+                    list_response = serde_json::from_slice(&body_bytes).unwrap();
                     for doc in list_response.documents {
                         let result = doc.try_into();
                         match result {
@@ -94,7 +127,8 @@ impl Firestore {
                             Err(_) => todo!(),
                         };
                     }
-                    return Ok(ret);
+
+                    next_page_token = list_response.next_page_token;
                 },
                 _ => {
                     todo!()
@@ -102,7 +136,7 @@ impl Firestore {
             }
         }
 
-        todo!()
+        Ok(ret)
     }
 
     async fn read<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<Option<T>> {
@@ -116,15 +150,15 @@ impl Firestore {
             .header(HeaderName::from_static("accept"), "application/json")
             .header(
                 HeaderName::from_static("authorization"),
-                format!("Bearer {}", &self._oauth_token),
+                format!("Bearer {}", *self._oauth_token.read().await),
             )
             .body(Body::empty())
             .unwrap();
-        info!("GET {}", uri);
+        debug!("GET {}", uri);
         let resp = self.client.request(req).await.unwrap();
         let status = resp.status();
         let body_bytes = body::to_bytes(resp.into_body()).await.unwrap();
-        info!(
+        debug!(
             "HTTP {} {}",
             status,
             String::from_utf8(body_bytes.to_vec()).unwrap(),
@@ -154,15 +188,15 @@ impl Firestore {
             .header(HeaderName::from_static("accept"), "application/json")
             .header(
                 HeaderName::from_static("authorization"),
-                format!("Bearer {}", &self._oauth_token),
+                format!("Bearer {}", *self._oauth_token.read().await),
             )
             .body(Body::from(serde_json::to_string(&doc).unwrap()))
             .unwrap();
-        info!("PATCH {} {:?}", uri, req);
+        debug!("PATCH {} {:?}", uri, req);
         let resp = self.client.request(req).await.unwrap();
         let status = resp.status();
         let body_bytes = body::to_bytes(resp.into_body()).await.unwrap();
-        info!(
+        debug!(
             "HTTP {} {}",
             status,
             String::from_utf8(body_bytes.to_vec()).unwrap()
@@ -254,7 +288,9 @@ struct OAuth2Response {
 async fn get_oauth_token(
     jwt: String,
     http_client: &Client<HttpsConnector<HttpConnector>>,
-) -> storage::Result<String> {
+) -> storage::Result<(String, usize)> {
+    let sw = time::Instant::now();
+
     let request_body = OAuth2Request {
         grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer".to_owned(),
         assertion: jwt,
@@ -268,21 +304,26 @@ async fn get_oauth_token(
     let response = http_client.request(request).await.unwrap();
     let status = response.status();
     let body_bytes = body::to_bytes(response.into_body()).await.unwrap();
+    let ret;
+
     match status {
         StatusCode::OK => {
             let body: OAuth2Response = serde_json::from_slice(&body_bytes)?;
             debug!("Response: {} {:?}", status, body);
-            Ok(body.access_token)
+            ret = Ok((body.access_token, body.expires_in));
         }
         _ => {
             let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
-            error!("Response: {} {}", status, body_str);
-            Err(storage::Error::OAuth(format!(
+            error!("Non-success when requesting OAuth token. Response: {} {}", status, body_str);
+            ret = Err(storage::Error::OAuth(format!(
                 "OAuth flow returned HTTP {} with body content: {}",
                 status, body_str
-            )))
+            )));
         }
     }
+
+    info!("get_oauth_token returned in {:?}", sw.elapsed());
+    ret
 }
 
 #[derive(Deserialize)]
@@ -370,6 +411,7 @@ mod tests {
 
     #[tokio::test(threaded_scheduler)]
     async fn test_list_cards() {
+        pretty_env_logger::init();
         tokio::spawn(async {
             let firestore = Firestore::new(JSON_KEY_PATH, "cards".to_owned())
                 .await
