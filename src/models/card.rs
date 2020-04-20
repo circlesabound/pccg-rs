@@ -61,7 +61,7 @@ mod tests {
             description: "test description".to_owned(),
             image_uri: "https://localhost/test_uri.png".to_owned(),
         };
-        
+
         let card_clone = card.clone();
         let mut doc: Document = card_clone.into();
         doc.name = format!("parent_path/{}", card.id.to_string());

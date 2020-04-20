@@ -25,5 +25,5 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "0.2", features = ["full"] }
 toml = "0.5"
-uuid = { version = "0.8", features = ["v4", "serde"] }
+uuid = { version = "0.8", features = ["v4", "v5", "serde"] }
 warp = "0.2"

@@ -21,7 +21,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-pub(crate) struct Firestore {
+pub struct Firestore {
     client: Arc<Client<HttpsConnector<HttpConnector>>>,
     firebase_project: String,
     parent_path: String,
@@ -64,22 +64,23 @@ impl Firestore {
                 } else {
                     debug!("Renewing OAuth token");
                     match build_jwt(&client_email, &private_key).await {
-                        Ok(jwt) => {
-                            match get_oauth_token(jwt, &client_clone).await {
-                                Ok(ret) => {
-                                    let mut oauth_token = oauth_token_clone.write().await;
-                                    *oauth_token = ret.0;
-                                    oauth_expires_in = ret.1 as u64;
-                                    debug!("Successfully renewed OAuth token");
-                                },
-                                Err(e) => {
-                                    error!("Failed to get OAuth token, will retry renewal flow in 10s. Error: {}", e);
-                                    oauth_expires_in = 10;
-                                }
+                        Ok(jwt) => match get_oauth_token(jwt, &client_clone).await {
+                            Ok(ret) => {
+                                let mut oauth_token = oauth_token_clone.write().await;
+                                *oauth_token = ret.0;
+                                oauth_expires_in = ret.1 as u64;
+                                debug!("Successfully renewed OAuth token");
+                            }
+                            Err(e) => {
+                                error!("Failed to get OAuth token, will retry renewal flow in 10s. Error: {}", e);
+                                oauth_expires_in = 10;
                             }
                         },
                         Err(e) => {
-                            error!("Failed to build JWT, will retry renewal flow in 10s. Error: {}", e);
+                            error!(
+                                "Failed to build JWT, will retry renewal flow in 10s. Error: {}",
+                                e
+                            );
                             oauth_expires_in = 10;
                         }
                     }
@@ -97,7 +98,7 @@ impl Firestore {
         })
     }
 
-    async fn list<T: TryFrom<Document>>(&self) -> storage::Result<Vec<T>> {
+    pub async fn list<T: TryFrom<Document>>(&self) -> storage::Result<Vec<T>> {
         const PAGE_SIZE: usize = 100;
         let mut ret = vec![];
         let mut next_page_token = None;
@@ -132,7 +133,8 @@ impl Firestore {
             debug!(
                 "HTTP {} {}",
                 status,
-                String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
+                String::from_utf8(body_bytes.to_vec())
+                    .unwrap_or_else(|_| "<mangled body>".to_owned()),
             );
 
             let list_response: ListDocumentsResponse;
@@ -160,7 +162,7 @@ impl Firestore {
         Ok(ret)
     }
 
-    async fn get<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<Option<T>> {
+    pub async fn get<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<Option<T>> {
         let uri = format!(
             "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}/{}",
             self.firebase_project, self.parent_path, id
@@ -193,11 +195,12 @@ impl Firestore {
                     Err(_) => todo!(),
                 }
             }
+            StatusCode::NOT_FOUND => Ok(None),
             _ => todo!(),
         }
     }
 
-    async fn insert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
+    pub async fn insert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
         let uri = format!(
             "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?documentId={}",
             self.firebase_project, self.parent_path, id
@@ -224,20 +227,24 @@ impl Firestore {
         );
         match status {
             StatusCode::OK => Ok(()),
-            StatusCode::CONFLICT => Err(storage::Error::Conflict(
-                format!("Value with id {} already exists under path {}", id.to_string(), self.parent_path)
-            )),
+            StatusCode::CONFLICT => Err(storage::Error::Conflict(format!(
+                "Value with id {} already exists under path '{}'",
+                id.to_string(),
+                self.parent_path
+            ))),
             _ => Err(storage::Error::Other(format!(
-                "Error inserting id {} under path {}: HTTP {} {}",
+                "Error inserting id {} under path '{}': HTTP {} {}",
                 id.to_string(),
                 self.parent_path,
                 status,
-                String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
-            )))
+                String::from_utf8(body_bytes.to_vec())
+                    .unwrap_or_else(|_| "<mangled body>".to_owned()),
+            ))),
         }
     }
 
-    async fn upsert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
+    pub async fn upsert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
+        // TODO return indication of whether it was an insert or an update
         let uri = format!(
             "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}/{}",
             self.firebase_project, self.parent_path, id
@@ -265,12 +272,13 @@ impl Firestore {
         match status {
             StatusCode::OK => Ok(()),
             _ => Err(storage::Error::Other(format!(
-                "Error upserting id {} under path {}: HTTP {} {}",
+                "Error upserting id {} under path '{}': HTTP {} {}",
                 id.to_string(),
                 self.parent_path,
                 status,
-                String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
-            )))
+                String::from_utf8(body_bytes.to_vec())
+                    .unwrap_or_else(|_| "<mangled body>".to_owned()),
+            ))),
         }
     }
 }
@@ -303,16 +311,16 @@ impl Document {
 pub enum DocumentField {
     NullValue,
     ArrayValue(DocumentArrayValue),
-    DoubleValue(f64),
-    IntegerValue(i32),
+    DoubleValue(String),
+    IntegerValue(String),
     StringValue(String),
     TimestampValue(DateTime<Utc>),
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum DocumentArrayValue {
-    Values(Vec<DocumentField>),
+pub struct DocumentArrayValue {
+    pub values: Option<Vec<DocumentField>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -391,7 +399,9 @@ async fn get_oauth_token(
     debug!("Request: {:?}", request);
     let response = http_client.request(request).await?;
     let status = response.status();
-    let body_bytes = body::to_bytes(response.into_body()).await.unwrap_or_default();
+    let body_bytes = body::to_bytes(response.into_body())
+        .await
+        .unwrap_or_default();
     let ret;
 
     match status {
@@ -401,7 +411,8 @@ async fn get_oauth_token(
             ret = Ok((body.access_token, body.expires_in));
         }
         _ => {
-            let body_str = String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned());
+            let body_str = String::from_utf8(body_bytes.to_vec())
+                .unwrap_or_else(|_| "<mangled body>".to_owned());
             error!(
                 "Non-success when requesting OAuth token. Response: {} {}",
                 status, body_str
@@ -427,7 +438,8 @@ struct ListDocumentsResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::Card;
+    use crate::models::{Card, User};
+    use chrono::SubsecRound;
 
     static JSON_KEY_PATH: &str = "secrets/service_account.json";
 
@@ -499,6 +511,37 @@ mod tests {
                 .unwrap();
 
             assert_eq!(card_to_write, card);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test(threaded_scheduler)]
+    async fn test_upsert_then_get_user() {
+        tokio::spawn(async {
+            let firestore = Firestore::new(JSON_KEY_PATH, "users".to_owned())
+                .await
+                .unwrap();
+            let id_to_write = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
+            let user_to_write = User {
+                id: id_to_write,
+                cards: vec![id_to_write],
+                currency: 50,
+                daily_last_claimed: Utc::now().trunc_subsecs(6),
+            };
+            firestore
+                .upsert(&id_to_write, user_to_write.clone())
+                .await
+                .unwrap();
+
+            let user: User = firestore
+                .get(&Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+
+            assert_eq!(user_to_write, user);
         })
         .await
         .unwrap();

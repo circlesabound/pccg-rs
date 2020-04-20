@@ -11,6 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time;
+use storage::firestore::Firestore;
 use tokio::{signal, task};
 
 #[tokio::main]
@@ -31,49 +32,15 @@ async fn main() {
     let config: models::config::Config = toml::from_str(&config_str).unwrap();
     let config = Arc::new(config);
 
-    let compendium_task_config = Arc::clone(&config);
-    let compendium_task = task::spawn(async move {
-        info!(
-            "Loading compendium from {}",
-            compendium_task_config.compendium.directory
-        );
-        let sw = time::Instant::now();
-        let storage: FsStore<models::Card> =
-            FsStore::new(PathBuf::from(&compendium_task_config.compendium.directory)).unwrap();
-        let compendium = models::Compendium::from_storage(Arc::new(storage))
-            .await
-            .unwrap_or_else(|err| {
-                panic!("Problem loading compendium: {:?}", err);
-            });
-        info!("Loaded compendium in {:?}", sw.elapsed());
-        compendium
-    });
-
-    let user_registry_task_config = Arc::clone(&config);
-    let user_registry_task = task::spawn(async move {
-        info!(
-            "Loading user registry from {}",
-            user_registry_task_config.user_registry.directory
-        );
-        let sw = time::Instant::now();
-        let storage: FsStore<models::User> = FsStore::new(PathBuf::from(
-            &user_registry_task_config.user_registry.directory,
-        ))
+    let users_firestore = Firestore::new(&config.firestore.secret, "users".to_owned())
+        .await
         .unwrap();
-        let user_registry = models::UserRegistry::from_storage(Arc::new(storage))
-            .await
-            .unwrap_or_else(|err| {
-                panic!("Problem loading user registry: {:?}", err);
-            });
-        info!("Loaded user registry in {:?}", sw.elapsed());
-        user_registry
-    });
-
-    let compendium = compendium_task.await.unwrap();
-    let user_registry = user_registry_task.await.unwrap();
+    let cards_firestore = Firestore::new(&config.firestore.secret, "cards".to_owned())
+        .await
+        .unwrap();
 
     info!("Initialising engine api");
-    let api = engine::Api::new(compendium, user_registry).await;
+    let api = engine::Api::new(cards_firestore, users_firestore).await;
     let api = Arc::new(api);
 
     info!("Starting web server");

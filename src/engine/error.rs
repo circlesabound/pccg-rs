@@ -1,4 +1,5 @@
 use crate::models::{CompendiumError, UserRegistryError};
+use crate::storage;
 use std::error;
 use std::fmt::{self, Display};
 use std::result;
@@ -72,9 +73,16 @@ impl From<UserRegistryError> for Error {
     }
 }
 
+impl From<storage::Error> for Error {
+    fn from(e: storage::Error) -> Self {
+        Error::new(ErrorCode::Storage, Some(e.into()))
+    }
+}
+
 #[derive(Debug)]
 pub enum ErrorSource {
     Compendium(CompendiumError),
+    Storage(storage::Error),
     UserRegistry(UserRegistryError),
 }
 
@@ -83,6 +91,7 @@ impl Display for ErrorSource {
         match self {
             ErrorSource::Compendium(ref e) => Display::fmt(e, f),
             ErrorSource::UserRegistry(ref e) => Display::fmt(e, f),
+            ErrorSource::Storage(ref e) => Display::fmt(e, f),
         }
     }
 }
@@ -92,6 +101,7 @@ impl error::Error for ErrorSource {
         match self {
             ErrorSource::Compendium(e) => Some(e),
             ErrorSource::UserRegistry(e) => Some(e),
+            ErrorSource::Storage(e) => Some(e),
         }
     }
 }
@@ -105,6 +115,12 @@ impl From<CompendiumError> for ErrorSource {
 impl From<UserRegistryError> for ErrorSource {
     fn from(e: UserRegistryError) -> Self {
         ErrorSource::UserRegistry(e)
+    }
+}
+
+impl From<storage::Error> for ErrorSource {
+    fn from(e: storage::Error) -> Self {
+        ErrorSource::Storage(e)
     }
 }
 
