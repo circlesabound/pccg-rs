@@ -372,6 +372,7 @@ mod tests {
 
     static JSON_KEY_PATH: &str = "secrets/service_account.json";
 
+    #[ignore]
     #[tokio::test(threaded_scheduler)]
     async fn can_read_key_from_json() {
         tokio::spawn(async {
@@ -381,6 +382,7 @@ mod tests {
         .unwrap();
     }
 
+    #[ignore]
     #[tokio::test(threaded_scheduler)]
     async fn test_build_jwt() {
         tokio::spawn(async {
@@ -393,6 +395,7 @@ mod tests {
         .unwrap();
     }
 
+    #[ignore]
     #[tokio::test(threaded_scheduler)]
     async fn test_get_oauth_token() {
         tokio::spawn(async {
@@ -411,6 +414,7 @@ mod tests {
         .unwrap();
     }
 
+    #[ignore]
     #[tokio::test(threaded_scheduler)]
     async fn test_write_then_read_card() {
         tokio::spawn(async {
@@ -441,6 +445,7 @@ mod tests {
         .unwrap();
     }
 
+    #[ignore]
     #[tokio::test(threaded_scheduler)]
     async fn test_list_cards() {
         tokio::spawn(async {

@@ -1,7 +1,7 @@
 FROM rust:slim
 
-RUN sudo apt update
-RUN sudo apt install pkg-config libssl-dev
+RUN apt update
+RUN apt install -y pkg-config libssl-dev
 
 WORKDIR /usr/src/app
 COPY Cargo.lock .
