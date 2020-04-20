@@ -1,9 +1,9 @@
-use chrono::Utc;
 use crate::{
     engine::{self, ErrorCode},
     models::{Card, User},
     storage::firestore::Firestore,
 };
+use chrono::Utc;
 use rand::Rng;
 use uuid::Uuid;
 
@@ -13,14 +13,8 @@ pub struct Api {
 }
 
 impl Api {
-    pub async fn new(
-        cards: Firestore,
-        users: Firestore,
-    ) -> Api {
-        Api {
-            cards,
-            users,
-        }
+    pub async fn new(cards: Firestore, users: Firestore) -> Api {
+        Api { cards, users }
     }
 
     pub async fn add_new_user(&self, user_id: &Uuid) -> engine::Result<()> {
@@ -74,14 +68,20 @@ impl Api {
                 } else {
                     Err(engine::Error::new(ErrorCode::DailyAlreadyClaimed, None))
                 }
-            },
+            }
             None => Err(engine::Error::new(ErrorCode::UserNotFound, None)),
         }
     }
 
     pub async fn get_user_ids(&self) -> engine::Result<Vec<Uuid>> {
         // TODO find a way to do this without a full db enumeration
-        Ok(self.users.list::<User>().await?.into_iter().map(|u| u.id).collect())
+        Ok(self
+            .users
+            .list::<User>()
+            .await?
+            .into_iter()
+            .map(|u| u.id)
+            .collect())
     }
 
     pub async fn get_user_by_id(&self, user_id: &Uuid) -> engine::Result<Option<User>> {
@@ -100,7 +100,13 @@ impl Api {
 
     pub async fn get_card_ids(&self) -> engine::Result<Vec<Uuid>> {
         // TODO find a way to do this without a full db enumeration
-        Ok(self.cards.list::<Card>().await?.into_iter().map(|c| c.id).collect())
+        Ok(self
+            .cards
+            .list::<Card>()
+            .await?
+            .into_iter()
+            .map(|c| c.id)
+            .collect())
     }
 
     pub async fn get_card_by_id(&self, card_id: &Uuid) -> engine::Result<Option<Card>> {
@@ -166,7 +172,13 @@ mod tests {
 
             // Await all 20 tasks, assert that at least 1 succeeded
             let completed_tasks = future::join_all(tasks).await;
-            assert!(completed_tasks.iter().filter(|b| *b.as_ref().unwrap()).count() >= 1);
+            assert!(
+                completed_tasks
+                    .iter()
+                    .filter(|b| *b.as_ref().unwrap())
+                    .count()
+                    >= 1
+            );
 
             // Fetch the updated currency amount, assert that it only increased once
             let user = api.get_user_by_id(&user_id).await.unwrap().unwrap();

@@ -1,3 +1,4 @@
+use serde::Serialize;
 use std::error;
 use std::fmt::{self, Display};
 use std::result;
@@ -40,6 +41,56 @@ impl error::Error for Error {
             Error::Other(_) => None,
             Error::Serialization(ref e) => Some(e),
         }
+    }
+}
+
+impl Serialize for Error {
+    fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let name = "storage::Error";
+        let variant_index;
+        let variant;
+        let value: String;
+        match *self {
+            Error::Conflict(ref e) => {
+                variant_index = 0;
+                variant = "Conflict";
+                value = e.to_string();
+            }
+            Error::Hyper(ref e) => {
+                variant_index = 1;
+                variant = "Hyper";
+                value = format!("{:?}", e);
+            }
+            Error::Io(ref e) => {
+                variant_index = 2;
+                variant = "Io";
+                value = format!("{:?}", e);
+            }
+            Error::Jwt(ref e) => {
+                variant_index = 3;
+                variant = "Jwt";
+                value = format!("{:?}", e);
+            }
+            Error::OAuth(ref e) => {
+                variant_index = 4;
+                variant = "OAuth";
+                value = e.to_string();
+            }
+            Error::Other(ref e) => {
+                variant_index = 5;
+                variant = "Other";
+                value = e.to_string();
+            }
+            Error::Serialization(ref e) => {
+                variant_index = 6;
+                variant = "Serialization";
+                value = format!("{:?}", e);
+            }
+        };
+        serializer.serialize_newtype_variant(name, variant_index, variant, &value)
     }
 }
 

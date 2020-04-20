@@ -27,8 +27,7 @@ impl TryFrom<Document> for User {
 
     fn try_from(value: Document) -> Result<Self, Self::Error> {
         let id = value.name.split('/').next_back().unwrap();
-        if let Some(DocumentField::ArrayValue(arr_opt)) = value.fields.get("cards")
-        {
+        if let Some(DocumentField::ArrayValue(arr_opt)) = value.fields.get("cards") {
             if let Some(DocumentField::IntegerValue(currency)) = value.fields.get("currency") {
                 if let Ok(currency) = currency.parse() {
                     if let Some(DocumentField::TimestampValue(daily_last_claimed)) =
@@ -70,12 +69,13 @@ impl Into<Document> for User {
         fields.insert(
             "cards".to_owned(),
             DocumentField::ArrayValue(DocumentArrayValue {
-                values: Some(self.cards
-                    .into_iter()
-                    .map(|id| DocumentField::StringValue(id.to_string()))
-                    .collect(),
-                )}
-            ),
+                values: Some(
+                    self.cards
+                        .into_iter()
+                        .map(|id| DocumentField::StringValue(id.to_string()))
+                        .collect(),
+                ),
+            }),
         );
         fields.insert(
             "currency".to_owned(),

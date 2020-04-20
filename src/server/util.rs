@@ -1,4 +1,4 @@
-use std::fmt;
+use crate::engine;
 use warp::http::StatusCode;
 use warp::reply::{self, Json, WithStatus};
 
@@ -14,11 +14,14 @@ pub fn reply_with_value<T: serde::Serialize>(
     reply::with_status(reply::json(value), status_code)
 }
 
-pub fn reply_with_error<T: fmt::Debug>(error: &T, status_code: StatusCode) -> WithStatus<Json> {
-    // TODO fix double serialisation
+pub fn reply_with_engine_error(error: &engine::Error, status_code: StatusCode) -> WithStatus<Json> {
+    reply::with_status(reply::json(error), status_code)
+}
+
+pub fn reply_with_error_message(message: String, status_code: StatusCode) -> WithStatus<Json> {
     reply::with_status(
         reply::json(&ErrorResponse {
-            error_message: format!("{:?}", error),
+            error_message: message,
         }),
         status_code,
     )
