@@ -3,6 +3,7 @@ use serde::Deserialize;
 #[derive(Clone, Deserialize)]
 pub struct Config {
     pub compendium: CompendiumConfig,
+    pub firestore: FirestoreConfig,
     pub user_registry: UserRegistryConfig,
     pub server: ServerConfig,
 }
@@ -30,4 +31,9 @@ impl ServerConfig {
 #[derive(Clone, Deserialize)]
 pub struct UserRegistryConfig {
     pub directory: String,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct FirestoreConfig {
+    pub secret: String,
 }

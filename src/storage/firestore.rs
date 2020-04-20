@@ -49,27 +49,40 @@ impl Firestore {
 
         // Start background task to refresh OAuth token
         let (tx, mut rx) = oneshot::channel();
-        let client_clone = client.clone();
+        let client_clone = Arc::clone(&client);
         let client_email = json_key.client_email.clone();
         let private_key = json_key.private_key.clone();
-        let oauth_token_clone = oauth_token.clone();
+        let oauth_token_clone = Arc::clone(&oauth_token);
         let handle = tokio::spawn(async move {
             while let Err(TryRecvError::Empty) = rx.try_recv() {
                 // Refresh token 10 minutes before expiration
-                // let delay_duration = tokio::time::Duration::from_secs(oauth_expires_in - 600);
-                let delay_duration = tokio::time::Duration::from_secs(5);
+                let delay_duration = tokio::time::Duration::from_secs(oauth_expires_in - 600);
                 tokio::time::delay_for(delay_duration).await;
                 if let Err(TryRecvError::Closed) = rx.try_recv() {
                     debug!("Stopping background task to refresh OAuth token");
                     break;
                 } else {
                     debug!("Renewing OAuth token");
-                    let jwt = build_jwt(&client_email, &private_key).await.unwrap();
-                    let ret = get_oauth_token(jwt, &client_clone).await.unwrap();
-                    let mut oauth_token = oauth_token_clone.write().await;
-                    *oauth_token = ret.0;
-                    oauth_expires_in = ret.1 as u64;
-                    debug!("Successfully renewed OAuth token");
+                    match build_jwt(&client_email, &private_key).await {
+                        Ok(jwt) => {
+                            match get_oauth_token(jwt, &client_clone).await {
+                                Ok(ret) => {
+                                    let mut oauth_token = oauth_token_clone.write().await;
+                                    *oauth_token = ret.0;
+                                    oauth_expires_in = ret.1 as u64;
+                                    debug!("Successfully renewed OAuth token");
+                                },
+                                Err(e) => {
+                                    error!("Failed to get OAuth token, will retry renewal flow in 10s. Error: {}", e);
+                                    oauth_expires_in = 10;
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            error!("Failed to build JWT, will retry renewal flow in 10s. Error: {}", e);
+                            oauth_expires_in = 10;
+                        }
+                    }
                 }
             }
         });
@@ -113,19 +126,19 @@ impl Firestore {
                 .body(Body::empty())
                 .unwrap();
             debug!("GET {}", uri);
-            let resp = self.client.request(req).await.unwrap();
+            let resp = self.client.request(req).await?;
             let status = resp.status();
-            let body_bytes = body::to_bytes(resp.into_body()).await.unwrap();
+            let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
             debug!(
                 "HTTP {} {}",
                 status,
-                String::from_utf8(body_bytes.to_vec()).unwrap(),
+                String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
             );
 
             let list_response: ListDocumentsResponse;
             match status {
                 StatusCode::OK => {
-                    list_response = serde_json::from_slice(&body_bytes).unwrap();
+                    list_response = serde_json::from_slice(&body_bytes)?;
                     for doc in list_response.documents {
                         let result = doc.try_into();
                         match result {
@@ -147,7 +160,7 @@ impl Firestore {
         Ok(ret)
     }
 
-    async fn read<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<Option<T>> {
+    async fn get<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<Option<T>> {
         let uri = format!(
             "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}/{}",
             self.firebase_project, self.parent_path, id
@@ -163,13 +176,13 @@ impl Firestore {
             .body(Body::empty())
             .unwrap();
         debug!("GET {}", uri);
-        let resp = self.client.request(req).await.unwrap();
+        let resp = self.client.request(req).await?;
         let status = resp.status();
-        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap();
+        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
         debug!(
             "HTTP {} {}",
             status,
-            String::from_utf8(body_bytes.to_vec()).unwrap(),
+            String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
         );
         match status {
             StatusCode::OK => {
@@ -177,14 +190,54 @@ impl Firestore {
                 let result: Result<T, _> = doc.try_into();
                 match result {
                     Ok(ret) => Ok(Some(ret)),
-                    Err(e) => todo!(),
+                    Err(_) => todo!(),
                 }
             }
             _ => todo!(),
         }
     }
 
-    async fn write<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
+    async fn insert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
+        let uri = format!(
+            "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?documentId={}",
+            self.firebase_project, self.parent_path, id
+        );
+        let doc: Document = value.into();
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(&uri)
+            .header(HeaderName::from_static("accept"), "application/json")
+            .header(
+                HeaderName::from_static("authorization"),
+                format!("Bearer {}", *self._oauth_token.read().await),
+            )
+            .body(Body::from(serde_json::to_string(&doc)?))
+            .unwrap();
+        debug!("POST {} {:?}", uri, req);
+        let resp = self.client.request(req).await?;
+        let status = resp.status();
+        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
+        debug!(
+            "HTTP {} {}",
+            status,
+            String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
+        );
+        match status {
+            StatusCode::OK => Ok(()),
+            StatusCode::CONFLICT => Err(storage::Error::Conflict(
+                format!("Value with id {} already exists under path {}", id.to_string(), self.parent_path)
+            )),
+            _ => Err(storage::Error::Other(format!(
+                "Error inserting id {} under path {}: HTTP {} {}",
+                id.to_string(),
+                self.parent_path,
+                status,
+                String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
+            )))
+        }
+    }
+
+    async fn upsert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
         let uri = format!(
             "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}/{}",
             self.firebase_project, self.parent_path, id
@@ -198,20 +251,26 @@ impl Firestore {
                 HeaderName::from_static("authorization"),
                 format!("Bearer {}", *self._oauth_token.read().await),
             )
-            .body(Body::from(serde_json::to_string(&doc).unwrap()))
+            .body(Body::from(serde_json::to_string(&doc)?))
             .unwrap();
         debug!("PATCH {} {:?}", uri, req);
-        let resp = self.client.request(req).await.unwrap();
+        let resp = self.client.request(req).await?;
         let status = resp.status();
-        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap();
+        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
         debug!(
             "HTTP {} {}",
             status,
-            String::from_utf8(body_bytes.to_vec()).unwrap()
+            String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
         );
         match status {
             StatusCode::OK => Ok(()),
-            _ => todo!(),
+            _ => Err(storage::Error::Other(format!(
+                "Error upserting id {} under path {}: HTTP {} {}",
+                id.to_string(),
+                self.parent_path,
+                status,
+                String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
+            )))
         }
     }
 }
@@ -330,9 +389,9 @@ async fn get_oauth_token(
         .body(Body::from(serde_json::to_string_pretty(&request_body)?))
         .unwrap();
     debug!("Request: {:?}", request);
-    let response = http_client.request(request).await.unwrap();
+    let response = http_client.request(request).await?;
     let status = response.status();
-    let body_bytes = body::to_bytes(response.into_body()).await.unwrap();
+    let body_bytes = body::to_bytes(response.into_body()).await.unwrap_or_default();
     let ret;
 
     match status {
@@ -342,7 +401,7 @@ async fn get_oauth_token(
             ret = Ok((body.access_token, body.expires_in));
         }
         _ => {
-            let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+            let body_str = String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned());
             error!(
                 "Non-success when requesting OAuth token. Response: {} {}",
                 status, body_str
@@ -354,7 +413,7 @@ async fn get_oauth_token(
         }
     }
 
-    info!("get_oauth_token returned in {:?}", sw.elapsed());
+    info!("Obtained OAuth token, took {:?}", sw.elapsed());
     ret
 }
 
@@ -416,7 +475,7 @@ mod tests {
 
     #[ignore]
     #[tokio::test(threaded_scheduler)]
-    async fn test_write_then_read_card() {
+    async fn test_upsert_then_get_card() {
         tokio::spawn(async {
             let firestore = Firestore::new(JSON_KEY_PATH, "cards".to_owned())
                 .await
@@ -429,12 +488,12 @@ mod tests {
                 image_uri: "https://localhost/test_uri.png".to_owned(),
             };
             firestore
-                .write(&id_to_write, card_to_write.clone())
+                .upsert(&id_to_write, card_to_write.clone())
                 .await
                 .unwrap();
 
             let card: Card = firestore
-                .read(&Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap())
+                .get(&Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap())
                 .await
                 .unwrap()
                 .unwrap();
