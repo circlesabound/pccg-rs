@@ -1,5 +1,5 @@
 use crate::storage;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use hyper::body;
 use hyper::client::HttpConnector;
 use hyper::{header::HeaderName, Body, Client, Method, Request, StatusCode};
@@ -13,7 +13,12 @@ use std::{
     sync::Arc,
     time,
 };
-use tokio::{fs, task, sync::{RwLock, oneshot}, sync::oneshot::error::TryRecvError};
+use tokio::{
+    fs,
+    sync::oneshot::error::TryRecvError,
+    sync::{oneshot, RwLock},
+    task,
+};
 use uuid::Uuid;
 
 pub(crate) struct Firestore {
@@ -80,22 +85,23 @@ impl Firestore {
     }
 
     async fn list<T: TryFrom<Document>>(&self) -> storage::Result<Vec<T>> {
+        const PAGE_SIZE: usize = 100;
         let mut ret = vec![];
         let mut next_page_token = None;
-        while let Some(_) = next_page_token {
+        loop {
             let uri: String;
             if let Some(token) = next_page_token {
                 uri = format!(
-                    "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?pageSize=100&pageToken={}",
-                    self.firebase_project, self.parent_path, token
+                    "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?pageSize={}&pageToken={}",
+                    self.firebase_project, self.parent_path, PAGE_SIZE, token
                 );
             } else {
                 uri = format!(
-                    "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?pageSize=100",
-                    self.firebase_project, self.parent_path
+                    "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?pageSize={}",
+                    self.firebase_project, self.parent_path, PAGE_SIZE
                 );
             }
-            
+
             let req = Request::builder()
                 .method(Method::GET)
                 .uri(&uri)
@@ -129,10 +135,12 @@ impl Firestore {
                     }
 
                     next_page_token = list_response.next_page_token;
-                },
-                _ => {
-                    todo!()
-                },
+                }
+                _ => todo!(),
+            }
+
+            if let None = next_page_token {
+                break;
             }
         }
 
@@ -220,11 +228,32 @@ pub struct Document {
     pub update_time: String,
 }
 
+impl Document {
+    pub fn new(fields: HashMap<String, DocumentField>) -> Document {
+        Document {
+            name: "".to_owned(),
+            fields,
+            create_time: "".to_owned(),
+            update_time: "".to_owned(),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DocumentField {
     NullValue,
+    ArrayValue(DocumentArrayValue),
+    DoubleValue(f64),
+    IntegerValue(i32),
     StringValue(String),
+    TimestampValue(DateTime<Utc>),
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DocumentArrayValue {
+    Values(Vec<DocumentField>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -314,7 +343,10 @@ async fn get_oauth_token(
         }
         _ => {
             let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
-            error!("Non-success when requesting OAuth token. Response: {} {}", status, body_str);
+            error!(
+                "Non-success when requesting OAuth token. Response: {} {}",
+                status, body_str
+            );
             ret = Err(storage::Error::OAuth(format!(
                 "OAuth flow returned HTTP {} with body content: {}",
                 status, body_str
@@ -411,12 +443,12 @@ mod tests {
 
     #[tokio::test(threaded_scheduler)]
     async fn test_list_cards() {
-        pretty_env_logger::init();
         tokio::spawn(async {
             let firestore = Firestore::new(JSON_KEY_PATH, "cards".to_owned())
                 .await
                 .unwrap();
             let cards: Vec<Card> = firestore.list().await.unwrap();
+            assert!(cards.len() > 1);
         })
         .await
         .unwrap();

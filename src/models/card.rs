@@ -44,11 +44,30 @@ impl Into<Document> for Card {
             "image_uri".to_owned(),
             DocumentField::StringValue(self.image_uri),
         );
-        Document {
-            name: "".to_owned(),
-            fields,
-            create_time: "".to_owned(),
-            update_time: "".to_owned(),
-        }
+        Document::new(fields)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::convert::TryInto;
+
+    #[test]
+    fn can_convert_between_document_and_card() {
+        let card = Card {
+            id: Uuid::new_v4(),
+            name: "test card".to_owned(),
+            description: "test description".to_owned(),
+            image_uri: "https://localhost/test_uri.png".to_owned(),
+        };
+        
+        let card_clone = card.clone();
+        let mut doc: Document = card_clone.into();
+        doc.name = format!("parent_path/{}", card.id.to_string());
+
+        let card_from_doc: Card = doc.try_into().unwrap();
+
+        assert_eq!(card, card_from_doc);
     }
 }
