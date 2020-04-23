@@ -89,7 +89,7 @@ impl Firestore {
         });
 
         Ok(Firestore {
-            client: client,
+            client,
             firebase_project: json_key.project_id,
             parent_path,
             _oauth_token: oauth_token,
@@ -98,68 +98,36 @@ impl Firestore {
         })
     }
 
-    pub async fn list<T: TryFrom<Document>>(&self) -> storage::Result<Vec<T>> {
-        const PAGE_SIZE: usize = 100;
-        let mut ret = vec![];
-        let mut next_page_token = None;
-        loop {
-            let uri: String;
-            if let Some(token) = next_page_token {
-                uri = format!(
-                    "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?pageSize={}&pageToken={}",
-                    self.firebase_project, self.parent_path, PAGE_SIZE, token
-                );
-            } else {
-                uri = format!(
-                    "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?pageSize={}",
-                    self.firebase_project, self.parent_path, PAGE_SIZE
-                );
-            }
-
-            let req = Request::builder()
-                .method(Method::GET)
-                .uri(&uri)
-                .header(HeaderName::from_static("accept"), "application/json")
-                .header(
-                    HeaderName::from_static("authorization"),
-                    format!("Bearer {}", *self._oauth_token.read().await),
-                )
-                .body(Body::empty())
-                .unwrap();
-            debug!("GET {}", uri);
-            let resp = self.client.request(req).await?;
-            let status = resp.status();
-            let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
-            debug!(
-                "HTTP {} {}",
-                status,
-                String::from_utf8(body_bytes.to_vec())
-                    .unwrap_or_else(|_| "<mangled body>".to_owned()),
-            );
-
-            let list_response: ListDocumentsResponse;
-            match status {
-                StatusCode::OK => {
-                    list_response = serde_json::from_slice(&body_bytes)?;
-                    for doc in list_response.documents {
-                        let result = doc.try_into();
-                        match result {
-                            Ok(t) => ret.push(t),
-                            Err(_) => todo!(),
-                        };
-                    }
-
-                    next_page_token = list_response.next_page_token;
-                }
-                _ => todo!(),
-            }
-
-            if let None = next_page_token {
-                break;
-            }
+    pub async fn delete<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<()> {
+        let uri = format!(
+            "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}/{}",
+            self.firebase_project, self.parent_path, id
+        );
+        let req = Request::builder()
+            .method(Method::DELETE)
+            .uri(&uri)
+            .header(HeaderName::from_static("accept"), "application/json")
+            .header(
+                HeaderName::from_static("authorization"),
+                format!("Bearer {}", *self._oauth_token.read().await),
+            )
+            .body(Body::empty())
+            .unwrap();
+        debug!("DELETE {}", uri);
+        let resp = self.client.request(req).await?;
+        let status = resp.status();
+        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
+        debug!(
+            "HTTP {}  {}",
+            status,
+            String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
+        );
+        match status {
+            StatusCode::OK => Ok(()),
+            _ => Err(storage::Error::Other(
+                String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned())
+            ))
         }
-
-        Ok(ret)
     }
 
     pub async fn get<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<Option<T>> {
@@ -241,6 +209,70 @@ impl Firestore {
                     .unwrap_or_else(|_| "<mangled body>".to_owned()),
             ))),
         }
+    }
+
+    pub async fn list<T: TryFrom<Document>>(&self) -> storage::Result<Vec<T>> {
+        const PAGE_SIZE: usize = 100;
+        let mut ret = vec![];
+        let mut next_page_token = None;
+        loop {
+            let uri: String;
+            if let Some(token) = next_page_token {
+                uri = format!(
+                    "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?pageSize={}&pageToken={}",
+                    self.firebase_project, self.parent_path, PAGE_SIZE, token
+                );
+            } else {
+                uri = format!(
+                    "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?pageSize={}",
+                    self.firebase_project, self.parent_path, PAGE_SIZE
+                );
+            }
+
+            let req = Request::builder()
+                .method(Method::GET)
+                .uri(&uri)
+                .header(HeaderName::from_static("accept"), "application/json")
+                .header(
+                    HeaderName::from_static("authorization"),
+                    format!("Bearer {}", *self._oauth_token.read().await),
+                )
+                .body(Body::empty())
+                .unwrap();
+            debug!("GET {}", uri);
+            let resp = self.client.request(req).await?;
+            let status = resp.status();
+            let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
+            debug!(
+                "HTTP {} {}",
+                status,
+                String::from_utf8(body_bytes.to_vec())
+                    .unwrap_or_else(|_| "<mangled body>".to_owned()),
+            );
+
+            let list_response: ListDocumentsResponse;
+            match status {
+                StatusCode::OK => {
+                    list_response = serde_json::from_slice(&body_bytes)?;
+                    for doc in list_response.documents {
+                        let result = doc.try_into();
+                        match result {
+                            Ok(t) => ret.push(t),
+                            Err(_) => todo!(),
+                        };
+                    }
+
+                    next_page_token = list_response.next_page_token;
+                }
+                _ => todo!(),
+            }
+
+            if let None = next_page_token {
+                break;
+            }
+        }
+
+        Ok(ret)
     }
 
     pub async fn upsert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {

@@ -1,4 +1,3 @@
-use crate::models::{CompendiumError, UserRegistryError};
 use crate::storage;
 use serde::Serialize;
 use std::error;

@@ -48,6 +48,15 @@ impl Api {
         self.add_card_to_user(user_id, &card.id).await
     }
 
+    pub async fn delete_user(&self, user_id: &Uuid) -> engine::Result<()> {
+        // Check user exists
+        if let Some(_) = self.users.get::<User>(user_id).await? {
+            Ok(self.users.delete::<User>(user_id).await?)
+        } else {
+            Err(engine::Error::new(ErrorCode::UserNotFound, None))
+        }
+    }
+
     pub async fn get_owned_card_ids(&self, user_id: &Uuid) -> engine::Result<Vec<Uuid>> {
         match self.users.get::<User>(user_id).await? {
             Some(user) => Ok(user.cards),
@@ -170,8 +179,16 @@ mod tests {
                 })
                 .collect();
 
-            // Await all 20 tasks, assert that at least 1 succeeded
+            // Await all 20 tasks
             let completed_tasks = future::join_all(tasks).await;
+
+            // Fetch the updated currency amount
+            let user = api.get_user_by_id(&user_id).await.unwrap().unwrap();
+
+            // Clean up before running assertions
+            api.delete_user(&user_id).await.unwrap();
+
+            // Assert that out of 20 tasks, at least 1 succceeded
             assert!(
                 completed_tasks
                     .iter()
@@ -180,8 +197,7 @@ mod tests {
                     >= 1
             );
 
-            // Fetch the updated currency amount, assert that it only increased once
-            let user = api.get_user_by_id(&user_id).await.unwrap().unwrap();
+            // Assert that the currency amount increased once
             assert!(user.currency > starting_currency);
             assert_eq!(user.currency - starting_currency, 200);
         })

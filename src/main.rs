@@ -6,13 +6,11 @@ mod models;
 mod server;
 mod storage;
 
-use crate::storage::fs::FsStore;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time;
 use storage::firestore::Firestore;
-use tokio::{signal, task};
+use tokio::signal;
 
 #[tokio::main]
 async fn main() {
