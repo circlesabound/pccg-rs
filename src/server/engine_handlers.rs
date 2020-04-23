@@ -22,6 +22,21 @@ pub async fn draw_card_for_user(
     }
 }
 
+pub async fn delete_user_from_registry(
+    user_id: Uuid,
+    api: Arc<engine::Api>,
+) -> Result<impl Reply, Infallible> {
+    info!("Handling: delete_user_from_registry");
+
+    match api.delete_user(&user_id).await {
+        Ok(_) => Ok(util::reply_empty(StatusCode::OK)),
+        Err(e) => Ok(util::reply_with_engine_error(
+            &e,
+            get_http_code(&e),
+        )),
+    }
+}
+
 pub async fn get_user_from_registry(
     user_id: Uuid,
     api: Arc<engine::Api>,
