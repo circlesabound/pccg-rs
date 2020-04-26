@@ -9,6 +9,7 @@ pub struct User {
     pub cards: Vec<Uuid>,
     pub currency: u32,
     pub daily_last_claimed: DateTime<Utc>,
+    pub staged_card: Option<Uuid>,
 }
 
 impl User {
@@ -18,6 +19,7 @@ impl User {
             cards: vec![],
             currency: 0,
             daily_last_claimed: Utc.timestamp(0, 0),
+            staged_card: None,
         }
     }
 }
@@ -34,7 +36,6 @@ impl TryFrom<Document> for User {
                         value.fields.get("daily_last_claimed")
                     {
                         let mut card_ids: Vec<Uuid> = vec![];
-
                         if let Some(arr) = &arr_opt.values {
                             for doc_field in arr {
                                 if let DocumentField::StringValue(id_str) = doc_field {
@@ -48,11 +49,19 @@ impl TryFrom<Document> for User {
                             }
                         }
 
+                        let staged_card = match value.fields.get("staged_card") {
+                            Some(DocumentField::StringValue(staged_id_str)) => {
+                                Some(Uuid::parse_str(staged_id_str).unwrap())
+                            },
+                            _ => None,
+                        };
+
                         return Ok(User {
                             id: Uuid::parse_str(id).unwrap(),
                             cards: card_ids,
                             currency,
                             daily_last_claimed: *daily_last_claimed,
+                            staged_card,
                         });
                     }
                 }
@@ -85,6 +94,12 @@ impl Into<Document> for User {
             "daily_last_claimed".to_owned(),
             DocumentField::TimestampValue(self.daily_last_claimed),
         );
+        if let Some(staged_card_id) = self.staged_card {
+            fields.insert(
+                "staged_card".to_owned(),
+                DocumentField::StringValue(staged_card_id.to_string()),
+            );
+        }
         Document::new(fields)
     }
 }

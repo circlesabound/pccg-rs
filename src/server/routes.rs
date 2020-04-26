@@ -61,10 +61,10 @@ pub fn build_routes(
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::list_cards_from_compendium);
 
-    let draw_card_for_user = warp::path!("users" / Uuid / "draw")
-        .and(warp::get())
+    let draw_card_to_stage_for_user = warp::path!("users" / Uuid / "draw")
+        .and(warp::post())
         .and(with_engine_api(Arc::clone(&api)))
-        .and_then(engine_handlers::draw_card_for_user);
+        .and_then(engine_handlers::draw_card_to_stage_for_user);
 
     let get_card_from_compendium = warp::path!("compendium" / Uuid)
         .and(warp::get())
@@ -77,6 +77,17 @@ pub fn build_routes(
         .and(with_json_from_body())
         .and_then(engine_handlers::put_card_to_compendium);
 
+    let get_staged_card = warp::path!("users" / Uuid / "stage")
+        .and(warp::get())
+        .and(with_engine_api(Arc::clone(&api)))
+        .and_then(engine_handlers::get_staged_card);
+
+    let confirm_staged_card = warp::path!("users" / Uuid / "stage")
+        .and(warp::post())
+        .and(with_engine_api(Arc::clone(&api)))
+        .and(with_json_from_body())
+        .and_then(engine_handlers::confirm_staged_card);
+
     ping.or(version)
         .or(list_users_from_registry)
         .or(get_user_from_registry)
@@ -85,10 +96,12 @@ pub fn build_routes(
         .or(add_card_to_user)
         .or(claim_daily_for_user)
         .or(delete_user_from_registry)
-        .or(draw_card_for_user)
+        .or(draw_card_to_stage_for_user)
         .or(list_cards_from_compendium)
         .or(get_card_from_compendium)
         .or(put_card_to_compendium)
+        .or(get_staged_card)
+        .or(confirm_staged_card)
         .recover(engine_handlers::handle_engine_error)
         .recover(handle_not_found)
         .recover(handle_method_not_allowed)

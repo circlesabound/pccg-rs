@@ -562,6 +562,7 @@ mod tests {
                 cards: vec![id_to_write],
                 currency: 50,
                 daily_last_claimed: Utc::now().trunc_subsecs(6),
+                staged_card: None,
             };
             firestore
                 .upsert(&id_to_write, user_to_write.clone())

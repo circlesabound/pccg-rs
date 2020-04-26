@@ -17,6 +17,10 @@ pub enum ErrorCode {
     CardNotFound,
     CompendiumEmpty,
     DailyAlreadyClaimed,
+    DrawStageEmpty,
+    DrawStagePopulated,
+    IdMismatch,
+    InsufficientFunds,
     Other,
     Storage,
     UserNotFound,
@@ -29,11 +33,11 @@ impl Error {
 
     pub fn classify(&self) -> ErrorCategory {
         match self.code {
-            ErrorCode::CardNotFound | ErrorCode::UserNotFound => ErrorCategory::BadRequest,
+            ErrorCode::CardNotFound | ErrorCode::IdMismatch | ErrorCode::UserNotFound => ErrorCategory::BadRequest,
             ErrorCode::CompendiumEmpty | ErrorCode::Other | ErrorCode::Storage => {
                 ErrorCategory::Internal
             }
-            ErrorCode::DailyAlreadyClaimed => ErrorCategory::FailedPrecondition,
+            ErrorCode::DailyAlreadyClaimed | ErrorCode::DrawStageEmpty | ErrorCode::DrawStagePopulated | ErrorCode::InsufficientFunds => ErrorCategory::FailedPrecondition,
         }
     }
 }
