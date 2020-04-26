@@ -5,4 +5,3 @@ mod engine_handlers;
 mod health_handlers;
 mod logging;
 mod schemas;
-mod util;

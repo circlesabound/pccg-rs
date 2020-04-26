@@ -3,6 +3,7 @@ use super::health_handlers;
 use super::logging;
 use crate::engine;
 
+use http::StatusCode;
 use std::convert::Infallible;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -10,7 +11,7 @@ use warp::{Filter, Rejection, Reply};
 
 pub fn build_routes(
     api: Arc<engine::Api>,
-) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
+) -> impl Filter<Extract = impl Reply, Error = Infallible> + Clone {
     let ping = warp::path!("ping")
         .and(warp::get())
         .and_then(health_handlers::ping);
@@ -88,6 +89,10 @@ pub fn build_routes(
         .or(list_cards_from_compendium)
         .or(get_card_from_compendium)
         .or(put_card_to_compendium)
+        .recover(engine_handlers::handle_engine_error)
+        .recover(handle_not_found)
+        .recover(handle_method_not_allowed)
+        .recover(unhandled)
         .with(logging::log_incoming_request())
 }
 
@@ -102,4 +107,34 @@ where
     T: Send + serde::de::DeserializeOwned,
 {
     warp::body::json()
+}
+
+async fn handle_method_not_allowed(err: Rejection) -> Result<impl Reply, Rejection> {
+    if let Some(_) = err.find::<warp::reject::MethodNotAllowed>() {
+        Ok(warp::reply::with_status(
+            warp::reply::reply(),
+            StatusCode::METHOD_NOT_ALLOWED,
+        ))
+    } else {
+        Err(err)
+    }
+}
+
+async fn handle_not_found(err: Rejection) -> Result<impl Reply, Rejection> {
+    if err.is_not_found() {
+        Ok(warp::reply::with_status(
+            warp::reply::reply(),
+            StatusCode::NOT_FOUND,
+        ))
+    } else {
+        Err(err)
+    }
+}
+
+async fn unhandled(err: Rejection) -> Result<impl Reply, Infallible> {
+    error!("Unhandled rejection {:?}", err);
+    Ok(warp::reply::with_status(
+        warp::reply::reply(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+    ))
 }

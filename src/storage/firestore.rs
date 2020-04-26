@@ -125,8 +125,9 @@ impl Firestore {
         match status {
             StatusCode::OK => Ok(()),
             _ => Err(storage::Error::Other(
-                String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned())
-            ))
+                String::from_utf8(body_bytes.to_vec())
+                    .unwrap_or_else(|_| "<mangled body>".to_owned()),
+            )),
         }
     }
 
