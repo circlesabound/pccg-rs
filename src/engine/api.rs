@@ -18,7 +18,8 @@ impl Api {
     }
 
     pub async fn add_new_user(&self, user_id: &Uuid) -> engine::Result<()> {
-        let user = User::new(*user_id);
+        let mut user = User::new(*user_id);
+        user.currency = constants::USER_STARTING_CURRENCY;
         match self.users.insert(user_id, user).await {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),

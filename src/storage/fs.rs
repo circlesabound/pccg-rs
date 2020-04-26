@@ -10,6 +10,7 @@ pub struct FsStore<T> {
 }
 
 impl<T> FsStore<T> {
+    #[allow(dead_code)]
     pub fn new<P: Into<PathBuf>>(dirname: P) -> storage::Result<FsStore<T>> {
         let path = dirname.into();
         fs::create_dir_all(&path)?;

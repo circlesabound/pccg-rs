@@ -10,6 +10,7 @@ pub(crate) struct InMemoryStore<T> {
 }
 
 impl<T> InMemoryStore<T> {
+    #[allow(dead_code)]
     pub fn new() -> storage::Result<InMemoryStore<T>> {
         Ok(InMemoryStore {
             items: DashMap::new(),
