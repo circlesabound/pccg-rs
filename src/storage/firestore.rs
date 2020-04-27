@@ -1,8 +1,13 @@
 use crate::storage;
 use chrono::{DateTime, Utc};
-use hyper::body;
-use hyper::client::HttpConnector;
-use hyper::{header::HeaderName, Body, Client, Method, Request, StatusCode};
+use hyper::{
+    body::{self, Body},
+    client::{Client, HttpConnector},
+    header::HeaderName,
+    Method,
+    Request,
+    StatusCode
+};
 use hyper_tls::HttpsConnector;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
@@ -153,7 +158,7 @@ impl Firestore {
                     debug!("Stopping background task to refresh OAuth token");
                     break;
                 } else {
-                    debug!("Renewing OAuth token");
+                    info!("Renewing OAuth token");
                     match build_jwt(&client_email, &private_key).await {
                         Ok(jwt) => match get_oauth_token(jwt, &client_clone).await {
                             Ok(ret) => {
@@ -188,7 +193,7 @@ impl Firestore {
         })
     }
 
-    pub async fn delete<T: TryFrom<Document>>(&self, name: &str) -> storage::Result<()> {
+    async fn delete<T: TryFrom<Document>>(&self, name: &str) -> storage::Result<()> {
         let uri = format!("https://firestore.googleapis.com/v1/{}", name);
         let req = Request::builder()
             .method(Method::DELETE)
@@ -218,7 +223,7 @@ impl Firestore {
         }
     }
 
-    pub async fn get<T: TryFrom<Document>>(&self, name: &str) -> storage::Result<Option<T>> {
+    async fn get<T: TryFrom<Document>>(&self, name: &str) -> storage::Result<Option<T>> {
         let uri = format!("https://firestore.googleapis.com/v1/{}", name);
         let req = Request::builder()
             .method(Method::GET)
@@ -253,7 +258,7 @@ impl Firestore {
         }
     }
 
-    pub async fn create_document<T: Into<Document>>(
+    async fn create_document<T: Into<Document>>(
         &self,
         parent: &str,
         collection_id: &str,
@@ -304,7 +309,7 @@ impl Firestore {
         }
     }
 
-    pub async fn list<T: TryFrom<Document>>(
+    async fn list<T: TryFrom<Document>>(
         &self,
         parent: &str,
         collection_id: &str,
@@ -374,7 +379,7 @@ impl Firestore {
         Ok(ret)
     }
 
-    pub async fn patch<T: Into<Document>>(
+    async fn patch<T: Into<Document>>(
         &self,
         document_name: &str,
         value: T,
@@ -411,6 +416,14 @@ impl Firestore {
                     .unwrap_or_else(|_| "<mangled body>".to_owned()),
             ))),
         }
+    }
+
+    async fn run_query<T: TryFrom<Document>>(
+        &self,
+        parent: &str,
+        structured_query: StructuredQuery,
+    ) -> storage::Result<T> {
+        todo!()
     }
 }
 
@@ -464,6 +477,34 @@ pub enum DocumentField {
 #[serde(rename_all = "camelCase")]
 pub struct DocumentArrayValue {
     pub values: Option<Vec<DocumentField>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ListDocumentsResponse {
+    documents: Option<Vec<Document>>,
+    next_page_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunQueryResponse {
+    transation: Option<String>,
+    document: Option<Document>,
+    read_time: Option<String>,
+    skipped_results: Option<u32>,
+}
+
+// TODO
+struct StructuredQuery {
+    select: String,
+    from: Vec<String>,
+    r#where: String,
+    order_by: Vec<String>,
+    start_at: String,
+    end_at: String,
+    offset: u32,
+    limit: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -552,6 +593,7 @@ async fn get_oauth_token(
             let body: OAuth2Response = serde_json::from_slice(&body_bytes)?;
             debug!("Response: {} {:?}", status, body);
             ret = Ok((body.access_token, body.expires_in));
+            info!("Obtained OAuth token, took {:?}", sw.elapsed());
         }
         _ => {
             let body_str = String::from_utf8(body_bytes.to_vec())
@@ -564,18 +606,11 @@ async fn get_oauth_token(
                 "OAuth flow returned HTTP {} with body content: {}",
                 status, body_str
             )));
+            info!("Failed to obtain OAuth token, took {:?}", sw.elapsed());
         }
     }
 
-    info!("Obtained OAuth token, took {:?}", sw.elapsed());
     ret
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ListDocumentsResponse {
-    documents: Option<Vec<Document>>,
-    next_page_token: Option<String>,
 }
 
 #[cfg(test)]
@@ -583,154 +618,6 @@ mod tests {
     use super::*;
 
     static JSON_KEY_PATH: &str = "secrets/service_account.json";
-
-    #[ignore]
-    #[tokio::test(threaded_scheduler)]
-    async fn can_read_key_from_json() {
-        tokio::spawn(async {
-            read_json_key(JSON_KEY_PATH).await.unwrap();
-        })
-        .await
-        .unwrap();
-    }
-
-    #[ignore]
-    #[tokio::test(threaded_scheduler)]
-    async fn test_build_jwt() {
-        tokio::spawn(async {
-            let key = read_json_key(JSON_KEY_PATH).await.unwrap();
-            build_jwt(&key.client_email, &key.private_key)
-                .await
-                .unwrap();
-        })
-        .await
-        .unwrap();
-    }
-
-    #[ignore]
-    #[tokio::test(threaded_scheduler)]
-    async fn test_get_oauth_token() {
-        tokio::spawn(async {
-            let key = read_json_key(JSON_KEY_PATH).await.unwrap();
-            let jwt = build_jwt(&key.client_email, &key.private_key)
-                .await
-                .unwrap();
-
-            let mut https = HttpsConnector::new();
-            https.https_only(true);
-            let client = Client::builder().build::<_, hyper::Body>(https);
-
-            get_oauth_token(jwt, &client).await.unwrap();
-        })
-        .await
-        .unwrap();
-    }
-
-    #[ignore]
-    #[tokio::test(threaded_scheduler)]
-    async fn test_upsert_then_get() {
-        tokio::spawn(async {
-            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-            let firestore = FirestoreClient::new(Arc::new(firestore), None, "test".to_owned());
-            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
-            let test_item = TestItem {
-                id,
-                number: 0,
-                test_case: "test_upsert_then_get".to_owned(),
-            };
-            firestore.upsert(&id, test_item.clone()).await.unwrap();
-            let ret = firestore.get::<TestItem>(&id).await.unwrap().unwrap();
-            assert_eq!(ret, test_item);
-        })
-        .await
-        .unwrap();
-    }
-
-    #[ignore]
-    #[tokio::test(threaded_scheduler)]
-    async fn test_list_empty_collection() {
-        tokio::spawn(async {
-            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test_list_empty_collection".to_owned());
-            let ret = firestore.list::<TestItem>().await.unwrap();
-            assert_eq!(ret, vec![]);
-        })
-        .await
-        .unwrap();
-    }
-
-    #[ignore]
-    #[tokio::test(threaded_scheduler)]
-    async fn test_list_non_empty_collection() {
-        tokio::spawn(async {
-            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test_list_non_empty_collection".to_owned());
-            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
-            let test_item = TestItem {
-                id,
-                number: 1,
-                test_case: "test_list_non_empty_collection".to_owned(),
-            };
-            firestore.upsert(&id, test_item.clone()).await.unwrap();
-            let ret = firestore.list::<TestItem>().await.unwrap();
-            assert_eq!(ret.len(), 1);
-            assert_eq!(ret[0], test_item);
-        })
-        .await
-        .unwrap();
-    }
-
-    #[ignore]
-    #[tokio::test(threaded_scheduler)]
-    async fn test_list_empty_subcollection() {
-        tokio::spawn(async {
-            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
-            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
-            let test_item = TestItem {
-                id,
-                number: 2,
-                test_case: "test_list_empty_subcollection".to_owned(),
-            };
-            firestore.upsert(&id, test_item).await.unwrap();
-            let sub_fs = FirestoreClient::new_for_subcollection(
-                &firestore,
-                id.to_string(),
-                "test".to_owned(),
-            );
-            let ret = sub_fs.list::<TestItem>().await.unwrap();
-            assert_eq!(ret, vec![]);
-        })
-        .await
-        .unwrap();
-    }
-
-    #[ignore]
-    #[tokio::test(threaded_scheduler)]
-    async fn test_list_non_empty_subcollection() {
-        tokio::spawn(async {
-            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
-            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap();
-            let test_item = TestItem {
-                id,
-                number: 3,
-                test_case: "test_list_non_empty_subcollection".to_owned(),
-            };
-            firestore.upsert(&id, test_item.clone()).await.unwrap();
-            let sub_fs = FirestoreClient::new_for_subcollection(
-                &firestore,
-                id.to_string(),
-                "test".to_owned(),
-            );
-            sub_fs.upsert(&id, test_item.clone()).await.unwrap();
-            let ret = sub_fs.list::<TestItem>().await.unwrap();
-            assert_eq!(ret.len(), 1);
-            assert_eq!(ret[0], test_item);
-        })
-        .await
-        .unwrap();
-    }
 
     #[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
     struct TestItem {
@@ -784,5 +671,169 @@ mod tests {
             fields.insert("test_case".to_owned(), DocumentField::StringValue(self.test_case));
             Document::new(fields)
         }
+    }
+
+    #[test]
+    fn can_convert_between_document_and_test_item() {
+        let test_item = TestItem {
+            id: Uuid::new_v4(),
+            number: 42,
+            test_case: "can_convert_between_document_and_test_item".to_owned(),
+        };
+
+        let mut doc: Document = test_item.clone().into();
+        doc.name = format!("parent_path/{}", test_item.id.to_string());
+
+        let test_item_from_doc: TestItem = doc.try_into().unwrap();
+
+        assert_eq!(test_item, test_item_from_doc);
+    }
+
+    #[ignore]
+    #[tokio::test(threaded_scheduler)]
+    async fn can_read_key_from_json() {
+        tokio::spawn(async {
+            read_json_key(JSON_KEY_PATH).await.unwrap();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test(threaded_scheduler)]
+    async fn can_build_jwt() {
+        tokio::spawn(async {
+            let key = read_json_key(JSON_KEY_PATH).await.unwrap();
+            build_jwt(&key.client_email, &key.private_key)
+                .await
+                .unwrap();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test(threaded_scheduler)]
+    async fn can_get_oauth_token() {
+        tokio::spawn(async {
+            let key = read_json_key(JSON_KEY_PATH).await.unwrap();
+            let jwt = build_jwt(&key.client_email, &key.private_key)
+                .await
+                .unwrap();
+
+            let mut https = HttpsConnector::new();
+            https.https_only(true);
+            let client = Client::builder().build::<_, hyper::Body>(https);
+
+            get_oauth_token(jwt, &client).await.unwrap();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test(threaded_scheduler)]
+    async fn upsert_then_get() {
+        tokio::spawn(async {
+            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "test".to_owned());
+            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
+            let test_item = TestItem {
+                id,
+                number: 0,
+                test_case: "upsert_then_get".to_owned(),
+            };
+            firestore.upsert(&id, test_item.clone()).await.unwrap();
+            let ret = firestore.get::<TestItem>(&id).await.unwrap().unwrap();
+            assert_eq!(ret, test_item);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test(threaded_scheduler)]
+    async fn list_empty_collection() {
+        tokio::spawn(async {
+            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test_list_empty_collection".to_owned());
+            let ret = firestore.list::<TestItem>().await.unwrap();
+            assert_eq!(ret, vec![]);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test(threaded_scheduler)]
+    async fn list_non_empty_collection() {
+        tokio::spawn(async {
+            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test_list_non_empty_collection".to_owned());
+            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+            let test_item = TestItem {
+                id,
+                number: 1,
+                test_case: "list_non_empty_collection".to_owned(),
+            };
+            firestore.upsert(&id, test_item.clone()).await.unwrap();
+            let ret = firestore.list::<TestItem>().await.unwrap();
+            assert_eq!(ret.len(), 1);
+            assert_eq!(ret[0], test_item);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test(threaded_scheduler)]
+    async fn list_empty_subcollection() {
+        tokio::spawn(async {
+            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
+            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
+            let test_item = TestItem {
+                id,
+                number: 2,
+                test_case: "list_empty_subcollection".to_owned(),
+            };
+            firestore.upsert(&id, test_item).await.unwrap();
+            let sub_fs = FirestoreClient::new_for_subcollection(
+                &firestore,
+                id.to_string(),
+                "test".to_owned(),
+            );
+            let ret = sub_fs.list::<TestItem>().await.unwrap();
+            assert_eq!(ret, vec![]);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test(threaded_scheduler)]
+    async fn list_non_empty_subcollection() {
+        tokio::spawn(async {
+            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
+            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap();
+            let test_item = TestItem {
+                id,
+                number: 3,
+                test_case: "list_non_empty_subcollection".to_owned(),
+            };
+            firestore.upsert(&id, test_item.clone()).await.unwrap();
+            let sub_fs = FirestoreClient::new_for_subcollection(
+                &firestore,
+                id.to_string(),
+                "test".to_owned(),
+            );
+            sub_fs.upsert(&id, test_item.clone()).await.unwrap();
+            let ret = sub_fs.list::<TestItem>().await.unwrap();
+            assert_eq!(ret.len(), 1);
+            assert_eq!(ret[0], test_item);
+        })
+        .await
+        .unwrap();
     }
 }

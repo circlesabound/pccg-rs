@@ -276,12 +276,12 @@ mod tests {
     async fn claim_daily_increases_currency_only_once() {
         tokio::spawn(async {
             let fs = Arc::new(Firestore::new(JSON_KEY_PATH).await.unwrap());
-            let cards = FirestoreClient::new(Arc::clone(&fs), None, "cards".to_owned());
-            let users = FirestoreClient::new(Arc::clone(&fs), None, "users".to_owned());
+            let cards = FirestoreClient::new(Arc::clone(&fs), None, "_test_cards".to_owned());
+            let users = FirestoreClient::new(Arc::clone(&fs), None, "_test_users".to_owned());
             let api = Arc::new(Api::new(cards, users).await);
 
             // Add a new user
-            let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+            let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
             api.add_new_user(&user_id).await.unwrap();
 
             // Save the starting currency amount
