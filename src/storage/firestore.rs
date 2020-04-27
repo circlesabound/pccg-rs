@@ -351,12 +351,14 @@ impl Firestore {
             match status {
                 StatusCode::OK => {
                     list_response = serde_json::from_slice(&body_bytes)?;
-                    for doc in list_response.documents {
-                        let result = doc.try_into();
-                        match result {
-                            Ok(t) => ret.push(t),
-                            Err(_) => todo!(),
-                        };
+                    if let Some(docs) = list_response.documents {
+                        for doc in docs {
+                            let result = doc.try_into();
+                            match result {
+                                Ok(t) => ret.push(t),
+                                Err(_) => todo!(),
+                            };
+                        }
                     }
 
                     next_page_token = list_response.next_page_token;
@@ -412,7 +414,7 @@ impl Firestore {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
     #[serde(skip_serializing)]
@@ -447,7 +449,7 @@ impl Document {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DocumentField {
     NullValue,
@@ -458,7 +460,7 @@ pub enum DocumentField {
     TimestampValue(DateTime<Utc>),
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentArrayValue {
     pub values: Option<Vec<DocumentField>>,
@@ -569,18 +571,16 @@ async fn get_oauth_token(
     ret
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ListDocumentsResponse {
-    documents: Vec<Document>,
+    documents: Option<Vec<Document>>,
     next_page_token: Option<String>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Card, User};
-    use chrono::SubsecRound;
 
     static JSON_KEY_PATH: &str = "secrets/service_account.json";
 
@@ -628,29 +628,19 @@ mod tests {
 
     #[ignore]
     #[tokio::test(threaded_scheduler)]
-    async fn test_upsert_then_get_card() {
+    async fn test_upsert_then_get() {
         tokio::spawn(async {
             let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-            let firestore = FirestoreClient::new(Arc::new(firestore), None, "cards".to_owned());
-            let id_to_write = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
-            let card_to_write = Card {
-                id: id_to_write.clone(),
-                name: "test name".to_owned(),
-                description: "test description".to_owned(),
-                image_uri: "https://localhost/test_uri.png".to_owned(),
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "test".to_owned());
+            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
+            let test_item = TestItem {
+                id,
+                number: 0,
+                test_case: "test_upsert_then_get".to_owned(),
             };
-            firestore
-                .upsert(&id_to_write, card_to_write.clone())
-                .await
-                .unwrap();
-
-            let card: Card = firestore
-                .get(&Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap())
-                .await
-                .unwrap()
-                .unwrap();
-
-            assert_eq!(card_to_write, card);
+            firestore.upsert(&id, test_item.clone()).await.unwrap();
+            let ret = firestore.get::<TestItem>(&id).await.unwrap().unwrap();
+            assert_eq!(ret, test_item);
         })
         .await
         .unwrap();
@@ -658,29 +648,12 @@ mod tests {
 
     #[ignore]
     #[tokio::test(threaded_scheduler)]
-    async fn test_upsert_then_get_user() {
+    async fn test_list_empty_collection() {
         tokio::spawn(async {
             let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-            let firestore = FirestoreClient::new(Arc::new(firestore), None, "users".to_owned());
-            let id_to_write = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
-            let user_to_write = User {
-                id: id_to_write,
-                currency: 50,
-                daily_last_claimed: Utc::now().trunc_subsecs(6),
-                staged_card: None,
-            };
-            firestore
-                .upsert(&id_to_write, user_to_write.clone())
-                .await
-                .unwrap();
-
-            let user: User = firestore
-                .get(&Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap())
-                .await
-                .unwrap()
-                .unwrap();
-
-            assert_eq!(user_to_write, user);
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test_list_empty_collection".to_owned());
+            let ret = firestore.list::<TestItem>().await.unwrap();
+            assert_eq!(ret, vec![]);
         })
         .await
         .unwrap();
@@ -688,14 +661,128 @@ mod tests {
 
     #[ignore]
     #[tokio::test(threaded_scheduler)]
-    async fn test_list_cards() {
+    async fn test_list_non_empty_collection() {
         tokio::spawn(async {
             let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-            let firestore = FirestoreClient::new(Arc::new(firestore), None, "cards".to_owned());
-            let cards: Vec<Card> = firestore.list().await.unwrap();
-            assert!(cards.len() > 1);
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test_list_non_empty_collection".to_owned());
+            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+            let test_item = TestItem {
+                id,
+                number: 1,
+                test_case: "test_list_non_empty_collection".to_owned(),
+            };
+            firestore.upsert(&id, test_item.clone()).await.unwrap();
+            let ret = firestore.list::<TestItem>().await.unwrap();
+            assert_eq!(ret.len(), 1);
+            assert_eq!(ret[0], test_item);
         })
         .await
         .unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test(threaded_scheduler)]
+    async fn test_list_empty_subcollection() {
+        tokio::spawn(async {
+            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
+            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
+            let test_item = TestItem {
+                id,
+                number: 2,
+                test_case: "test_list_empty_subcollection".to_owned(),
+            };
+            firestore.upsert(&id, test_item).await.unwrap();
+            let sub_fs = FirestoreClient::new_for_subcollection(
+                &firestore,
+                id.to_string(),
+                "test".to_owned(),
+            );
+            let ret = sub_fs.list::<TestItem>().await.unwrap();
+            assert_eq!(ret, vec![]);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test(threaded_scheduler)]
+    async fn test_list_non_empty_subcollection() {
+        tokio::spawn(async {
+            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
+            let id = Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap();
+            let test_item = TestItem {
+                id,
+                number: 3,
+                test_case: "test_list_non_empty_subcollection".to_owned(),
+            };
+            firestore.upsert(&id, test_item.clone()).await.unwrap();
+            let sub_fs = FirestoreClient::new_for_subcollection(
+                &firestore,
+                id.to_string(),
+                "test".to_owned(),
+            );
+            sub_fs.upsert(&id, test_item.clone()).await.unwrap();
+            let ret = sub_fs.list::<TestItem>().await.unwrap();
+            assert_eq!(ret.len(), 1);
+            assert_eq!(ret[0], test_item);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+    struct TestItem {
+        pub id: Uuid,
+        pub number: u32,
+        pub test_case: String,
+    }
+
+    impl TryFrom<Document> for TestItem {
+        type Error = String;
+
+        fn try_from(value: Document) -> Result<Self, Self::Error> {
+            let id = value.extract_id();
+            if let Err(e) = id {
+                return Err(format!("Could not convert Document to TestItem: error parsing id: {}", e));
+            }
+            let id = id.unwrap();
+
+            let number;
+            if let Some(DocumentField::IntegerValue(number_str)) = value.fields.get("number") {
+                match number_str.parse() {
+                    Ok(n) => number = n,
+                    Err(e) => {
+                        return Err(format!("Could not convert Document to TestItem: error parsing field 'number': {}", e));
+                    }
+                }
+            } else {
+                return Err("Could not convert Document to TestItem: missing field 'number'".to_owned());
+            }
+
+            let test_case;
+            if let Some(DocumentField::StringValue(test_case_str)) = value.fields.get("test_case") {
+                test_case = test_case_str.to_string();
+            } else {
+                return Err("Could not convert Document to TestItem: missing field 'test_case'".to_owned());
+            }
+
+            Ok(TestItem {
+                id,
+                number,
+                test_case,
+            })
+        }
+    }
+
+    impl Into<Document> for TestItem {
+        fn into(self) -> Document {
+            let mut fields = HashMap::new();
+            fields.insert("id".to_owned(), DocumentField::StringValue(self.id.to_string()));
+            fields.insert("number".to_owned(), DocumentField::IntegerValue(self.number.to_string()));
+            fields.insert("test_case".to_owned(), DocumentField::StringValue(self.test_case));
+            Document::new(fields)
+        }
     }
 }
