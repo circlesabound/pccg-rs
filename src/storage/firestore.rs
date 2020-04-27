@@ -50,6 +50,24 @@ impl FirestoreClient {
         }
     }
 
+    pub fn new_for_subcollection(
+        firestore_client: &FirestoreClient,
+        subcollection_relative_path: String,
+        subcollection_id: String,
+    ) -> FirestoreClient {
+        let parent_path = format!(
+            "{}/{}/{}",
+            firestore_client.parent_path,
+            firestore_client.collection_id,
+            subcollection_relative_path
+        );
+        FirestoreClient {
+            firestore: Arc::clone(&firestore_client.firestore),
+            parent_path,
+            collection_id: subcollection_id,
+        }
+    }
+
     pub async fn delete<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<()> {
         let name = format!(
             "{}/{}/{}",
@@ -415,6 +433,18 @@ impl Document {
             update_time: "".to_owned(),
         }
     }
+
+    pub fn extract_id(&self) -> Result<Uuid, String> {
+        if let Some(id) = self.name.split('/').next_back() {
+            if let Ok(id) = Uuid::parse_str(&id) {
+                Ok(id)
+            } else {
+                Err(format!("Unable to convert id '{}' to a uuid", id))
+            }
+        } else {
+            Err(format!("Invalid name '{}'", self.name))
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -635,7 +665,6 @@ mod tests {
             let id_to_write = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
             let user_to_write = User {
                 id: id_to_write,
-                cards: vec![id_to_write],
                 currency: 50,
                 daily_last_claimed: Utc::now().trunc_subsecs(6),
                 staged_card: None,

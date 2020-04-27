@@ -40,16 +40,15 @@ pub fn build_routes(
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::delete_user_from_registry);
 
-    let list_cards_for_user = warp::path!("users" / Uuid / "cards")
+    let list_characters_for_user = warp::path!("users" / Uuid / "characters")
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
-        .and_then(engine_handlers::list_cards_for_user);
+        .and_then(engine_handlers::list_characters_for_user);
 
-    let add_card_to_user = warp::path!("users" / Uuid / "cards" / "add")
-        .and(warp::post())
+    let get_character_for_user = warp::path!("users" / Uuid / "characters" / Uuid)
+        .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
-        .and(with_json_from_body())
-        .and_then(engine_handlers::add_card_to_user);
+        .and_then(engine_handlers::get_character_for_user);
 
     let claim_daily_for_user = warp::path!("users" / Uuid / "daily")
         .and(warp::post())
@@ -92,8 +91,8 @@ pub fn build_routes(
         .or(list_users_from_registry)
         .or(get_user_from_registry)
         .or(add_user_to_registry)
-        .or(list_cards_for_user)
-        .or(add_card_to_user)
+        .or(list_characters_for_user)
+        .or(get_character_for_user)
         .or(claim_daily_for_user)
         .or(delete_user_from_registry)
         .or(draw_card_to_stage_for_user)

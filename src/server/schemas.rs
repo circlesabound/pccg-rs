@@ -45,7 +45,10 @@ pub struct DrawCardToStageForUserResponse {
     pub currency: u32,
 }
 
-pub type ListCardsForUserResponse = Vec<Uuid>;
+#[derive(Serialize)]
+pub struct ListCharactersForUserResponse {
+    pub characters: Vec<models::Character>,
+}
 
 pub type ListCardsFromCompendiumResponse = Vec<Uuid>;
 

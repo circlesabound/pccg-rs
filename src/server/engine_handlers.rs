@@ -8,27 +8,6 @@ use uuid::Uuid;
 use warp::http::StatusCode;
 use warp::{reject, reply, Rejection, Reply};
 
-pub async fn add_card_to_user(
-    user_id: Uuid,
-    api: Arc<engine::Api>,
-    body: schemas::AddCardToUserRequest,
-) -> Result<impl Reply, Rejection> {
-    info!("Handling: add_card_to_user");
-
-    // Validate explicit user ID parameter matches ID in body
-    if user_id != body.user_id {
-        return Err(reject::custom(MessageError {
-            error_message: "id mismatch".to_owned(),
-            status_code: StatusCode::BAD_REQUEST,
-        }));
-    }
-
-    match api.add_card_to_user(&user_id, &body.card_id).await {
-        Ok(_) => Ok(reply::with_status(reply::reply(), StatusCode::OK)),
-        Err(e) => Err(reject::custom(EngineError::new(e))),
-    }
-}
-
 pub async fn add_user_to_registry(api: Arc<engine::Api>) -> Result<impl Reply, Rejection> {
     info!("Handling: add_user_to_registry");
 
@@ -172,6 +151,23 @@ pub async fn get_card_from_compendium(
     }
 }
 
+pub async fn get_character_for_user(
+    user_id: Uuid,
+    character_id: Uuid,
+    api: Arc<engine::Api>,
+) -> Result<impl Reply, Rejection> {
+    info!("Handling: get_character_for_user");
+
+    match api.get_character_for_user(&user_id, &character_id).await {
+        Ok(Some(character)) => Ok(reply::with_status(reply::json(&character), StatusCode::OK)),
+        Ok(None) => Err(reject::not_found()),
+        Err(e) => Err(reject::custom(EngineError {
+            error: e,
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        })),
+    }
+}
+
 pub async fn get_staged_card(
     user_id: Uuid,
     api: Arc<engine::Api>,
@@ -211,15 +207,17 @@ pub async fn get_user_from_registry(
     }
 }
 
-pub async fn list_cards_for_user(
+pub async fn list_characters_for_user(
     user_id: Uuid,
     api: Arc<engine::Api>,
 ) -> Result<impl Reply, Rejection> {
-    info!("Handling: list_cards_for_user");
+    info!("Handling: list_characters_for_user");
 
-    match api.get_owned_card_ids(&user_id).await {
+    match api.get_characters_for_user(&user_id).await {
         Ok(card_ids) => Ok(reply::with_status(
-            reply::json(&schemas::ListCardsForUserResponse::from(card_ids)),
+            reply::json(&schemas::ListCharactersForUserResponse {
+                characters: card_ids,
+            }),
             StatusCode::OK,
         )),
         Err(e) => Err(reject::custom(EngineError::new(e))),

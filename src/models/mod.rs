@@ -5,3 +5,6 @@ pub mod config;
 
 mod user;
 pub use self::user::User;
+
+mod character;
+pub use self::character::Character;

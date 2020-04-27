@@ -1,6 +1,6 @@
 use crate::{
     engine::{self, constants, ErrorCode},
-    models::{Card, User},
+    models::{Card, Character, User},
     storage::firestore::FirestoreClient,
 };
 use chrono::Utc;
@@ -23,24 +23,6 @@ impl Api {
         match self.users.insert(user_id, user).await {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
-        }
-    }
-
-    pub async fn add_card_to_user(&self, user_id: &Uuid, card_id: &Uuid) -> engine::Result<Card> {
-        // Check user exists
-        match self.users.get::<User>(user_id).await? {
-            Some(mut user) => {
-                // Check card exists
-                match self.cards.get::<Card>(card_id).await? {
-                    Some(card) => {
-                        user.cards.push(*card_id);
-                        self.users.upsert(user_id, user).await?;
-                        Ok(card)
-                    }
-                    None => Err(engine::Error::new(ErrorCode::CardNotFound, None)),
-                }
-            }
-            None => Err(engine::Error::new(ErrorCode::UserNotFound, None)),
         }
     }
 
@@ -129,11 +111,33 @@ impl Api {
         Ok(self.cards.get::<Card>(card_id).await?)
     }
 
-    pub async fn get_owned_card_ids(&self, user_id: &Uuid) -> engine::Result<Vec<Uuid>> {
-        match self.users.get::<User>(user_id).await? {
-            Some(user) => Ok(user.cards),
+    pub async fn get_characters_for_user(&self, user_id: &Uuid) -> engine::Result<Vec<Character>> {
+        match self.get_user_by_id(user_id).await? {
+            Some(_) => {
+                let fs = FirestoreClient::new_for_subcollection(
+                    &self.users,
+                    user_id.to_string(),
+                    "characters".to_owned(),
+                );
+
+                Ok(fs.list::<Character>().await?)
+            }
             None => Err(engine::Error::new(ErrorCode::UserNotFound, None)),
         }
+    }
+
+    pub async fn get_character_for_user(
+        &self,
+        user_id: &Uuid,
+        character_id: &Uuid,
+    ) -> engine::Result<Option<Character>> {
+        let fs = FirestoreClient::new_for_subcollection(
+            &self.users,
+            user_id.to_string(),
+            "characters".to_owned(),
+        );
+
+        Ok(fs.get::<Character>(character_id).await?)
     }
 
     pub async fn get_random_card(&self) -> engine::Result<Card> {
@@ -192,7 +196,14 @@ impl Api {
             if let Some(staged_card_id) = user.staged_card {
                 if staged_card_id == *requested_card_id {
                     if let Some(card) = self.cards.get::<Card>(&staged_card_id).await? {
-                        user.cards.push(staged_card_id);
+                        let character_id = Uuid::new_v4();
+                        let character = Character::new(character_id, staged_card_id);
+                        let fs = FirestoreClient::new_for_subcollection(
+                            &self.users,
+                            user_id.to_string(),
+                            "characters".to_owned(),
+                        );
+                        fs.insert(&character_id, character).await?;
                         user.staged_card = None;
                         self.users.upsert(user_id, user).await?;
                         Ok(card)
