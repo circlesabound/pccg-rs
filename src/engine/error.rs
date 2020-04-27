@@ -33,11 +33,16 @@ impl Error {
 
     pub fn classify(&self) -> ErrorCategory {
         match self.code {
-            ErrorCode::CardNotFound | ErrorCode::IdMismatch | ErrorCode::UserNotFound => ErrorCategory::BadRequest,
+            ErrorCode::CardNotFound | ErrorCode::IdMismatch | ErrorCode::UserNotFound => {
+                ErrorCategory::BadRequest
+            }
             ErrorCode::CompendiumEmpty | ErrorCode::Other | ErrorCode::Storage => {
                 ErrorCategory::Internal
             }
-            ErrorCode::DailyAlreadyClaimed | ErrorCode::DrawStageEmpty | ErrorCode::DrawStagePopulated | ErrorCode::InsufficientFunds => ErrorCategory::FailedPrecondition,
+            ErrorCode::DailyAlreadyClaimed
+            | ErrorCode::DrawStageEmpty
+            | ErrorCode::DrawStagePopulated
+            | ErrorCode::InsufficientFunds => ErrorCategory::FailedPrecondition,
         }
     }
 }

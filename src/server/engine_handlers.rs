@@ -82,10 +82,7 @@ pub async fn confirm_staged_card(
     match body.action {
         schemas::StagedCardAction::Promote => {
             match api.promote_staged_card(&user_id, &body.card_id).await {
-                Ok(card) => Ok(reply::with_status(
-                    reply::json(&card),
-                    StatusCode::OK,
-                )),
+                Ok(card) => Ok(reply::with_status(reply::json(&card), StatusCode::OK)),
                 Err(e) => {
                     let status_code;
                     if let ErrorCode::CardNotFound = e.code {
@@ -99,14 +96,11 @@ pub async fn confirm_staged_card(
                     }))
                 }
             }
-        },
+        }
         schemas::StagedCardAction::Scrap => {
             match api.scrap_staged_card(&user_id, &body.card_id).await {
                 Ok(currency) => Ok(reply::with_status(
-                    reply::json(&schemas::ScrapCardResponse {
-                        user_id,
-                        currency,
-                    }),
+                    reply::json(&schemas::ScrapCardResponse { user_id, currency }),
                     StatusCode::OK,
                 )),
                 Err(e) => {
@@ -122,7 +116,7 @@ pub async fn confirm_staged_card(
                     }))
                 }
             }
-        },
+        }
     }
 }
 
@@ -155,11 +149,9 @@ pub async fn draw_card_to_stage_for_user(
 
     match api.draw_card_to_stage_for_user(&user_id).await {
         Ok(currency) => Ok(reply::with_status(
-            reply::json(&schemas::DrawCardToStageForUserResponse {
-                user_id,
-                currency,
-            }),
-            StatusCode::OK)),
+            reply::json(&schemas::DrawCardToStageForUserResponse { user_id, currency }),
+            StatusCode::OK,
+        )),
         Err(e) => Err(reject::custom(EngineError::new(e))),
     }
 }

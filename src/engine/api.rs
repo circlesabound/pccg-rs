@@ -1,19 +1,19 @@
 use crate::{
     engine::{self, constants, ErrorCode},
     models::{Card, User},
-    storage::firestore::Firestore,
+    storage::firestore::FirestoreClient,
 };
 use chrono::Utc;
 use rand::Rng;
 use uuid::Uuid;
 
 pub struct Api {
-    cards: Firestore,
-    users: Firestore,
+    cards: FirestoreClient,
+    users: FirestoreClient,
 }
 
 impl Api {
-    pub async fn new(cards: Firestore, users: Firestore) -> Api {
+    pub async fn new(cards: FirestoreClient, users: FirestoreClient) -> Api {
         Api { cards, users }
     }
 
@@ -86,22 +86,16 @@ impl Api {
 
     pub async fn draw_card_to_stage_for_user(&self, user_id: &Uuid) -> engine::Result<u32> {
         // Get user
-        let mut user = self.get_user_by_id(user_id).await?.ok_or(engine::Error::new(
-            ErrorCode::UserNotFound,
-            None,
-        ))?;
+        let mut user = self
+            .get_user_by_id(user_id)
+            .await?
+            .ok_or(engine::Error::new(ErrorCode::UserNotFound, None))?;
 
         // Check preconditions
         if user.currency < constants::DRAW_COST {
-            Err(engine::Error::new(
-                ErrorCode::InsufficientFunds,
-                None,
-            ))
+            Err(engine::Error::new(ErrorCode::InsufficientFunds, None))
         } else if let Some(_) = user.staged_card {
-            Err(engine::Error::new(
-                ErrorCode::DrawStagePopulated,
-                None,
-            ))
+            Err(engine::Error::new(ErrorCode::DrawStagePopulated, None))
         } else {
             // Subtract funds
             let new_currency_amount = user.currency - constants::DRAW_COST;
@@ -160,7 +154,10 @@ impl Api {
                 } else {
                     // ID of staged card does not match a card in compendium
                     // Maybe it was removed?
-                    error!("Staged card with id {} for user {} not found in compendium!", staged_card_id, user_id);
+                    error!(
+                        "Staged card with id {} for user {} not found in compendium!",
+                        staged_card_id, user_id
+                    );
                     Err(engine::Error::new(ErrorCode::CardNotFound, None))
                 }
             } else {
@@ -186,7 +183,11 @@ impl Api {
         Ok(self.users.get::<User>(user_id).await?)
     }
 
-    pub async fn promote_staged_card(&self, user_id: &Uuid, requested_card_id: &Uuid) -> engine::Result<Card> {
+    pub async fn promote_staged_card(
+        &self,
+        user_id: &Uuid,
+        requested_card_id: &Uuid,
+    ) -> engine::Result<Card> {
         if let Some(mut user) = self.users.get::<User>(user_id).await? {
             if let Some(staged_card_id) = user.staged_card {
                 if staged_card_id == *requested_card_id {
@@ -198,7 +199,10 @@ impl Api {
                     } else {
                         // ID of staged card does not match a card in compendium
                         // Maybe it was removed?
-                        error!("Staged card with id {} for user {} not found in compendium!", staged_card_id, user_id);
+                        error!(
+                            "Staged card with id {} for user {} not found in compendium!",
+                            staged_card_id, user_id
+                        );
                         Err(engine::Error::new(ErrorCode::CardNotFound, None))
                     }
                 } else {
@@ -214,7 +218,11 @@ impl Api {
         }
     }
 
-    pub async fn scrap_staged_card(&self, user_id: &Uuid, requested_card_id: &Uuid) -> engine::Result<u32> {
+    pub async fn scrap_staged_card(
+        &self,
+        user_id: &Uuid,
+        requested_card_id: &Uuid,
+    ) -> engine::Result<u32> {
         if let Some(mut user) = self.users.get::<User>(user_id).await? {
             if let Some(staged_card_id) = user.staged_card {
                 if staged_card_id == *requested_card_id {
@@ -246,6 +254,7 @@ pub enum AddOrUpdateOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::firestore::Firestore;
     use futures::future;
     use std::sync::Arc;
 
@@ -255,12 +264,9 @@ mod tests {
     #[tokio::test(threaded_scheduler)]
     async fn claim_daily_increases_currency_only_once() {
         tokio::spawn(async {
-            let cards = Firestore::new(JSON_KEY_PATH, "cards".to_owned())
-                .await
-                .unwrap();
-            let users = Firestore::new(JSON_KEY_PATH, "users".to_owned())
-                .await
-                .unwrap();
+            let fs = Arc::new(Firestore::new(JSON_KEY_PATH).await.unwrap());
+            let cards = FirestoreClient::new(Arc::clone(&fs), None, "cards".to_owned());
+            let users = FirestoreClient::new(Arc::clone(&fs), None, "users".to_owned());
             let api = Arc::new(Api::new(cards, users).await);
 
             // Add a new user
@@ -300,7 +306,7 @@ mod tests {
 
             // Assert that the currency amount increased once
             assert!(user.currency > starting_currency);
-            assert_eq!(user.currency - starting_currency, 200);
+            assert_eq!(user.currency - starting_currency, constants::DAILY);
         })
         .await
         .unwrap();

@@ -15,26 +15,99 @@ use std::{
 };
 use tokio::{
     fs,
-    sync::oneshot::error::TryRecvError,
-    sync::{oneshot, RwLock},
+    sync::oneshot::{self, error::TryRecvError},
+    sync::RwLock,
     task,
 };
 use uuid::Uuid;
 
+pub struct FirestoreClient {
+    firestore: Arc<Firestore>,
+    parent_path: String,
+    collection_id: String,
+}
+
+impl FirestoreClient {
+    pub fn new(
+        firestore: Arc<Firestore>,
+        collection_parent_path: Option<String>,
+        collection_id: String,
+    ) -> FirestoreClient {
+        let parent_path = match collection_parent_path {
+            Some(parent_path) => format!(
+                "projects/{}/databases/(default)/documents/{}",
+                firestore.firebase_project_id, parent_path,
+            ),
+            None => format!(
+                "projects/{}/databases/(default)/documents",
+                firestore.firebase_project_id,
+            ),
+        };
+        FirestoreClient {
+            firestore,
+            parent_path,
+            collection_id,
+        }
+    }
+
+    pub async fn delete<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<()> {
+        let name = format!(
+            "{}/{}/{}",
+            self.parent_path,
+            self.collection_id,
+            id.to_string()
+        );
+        self.firestore.delete::<T>(&name).await
+    }
+
+    pub async fn get<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<Option<T>> {
+        let name = format!(
+            "{}/{}/{}",
+            self.parent_path,
+            self.collection_id,
+            id.to_string()
+        );
+        self.firestore.get::<T>(&name).await
+    }
+
+    pub async fn insert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
+        self.firestore
+            .create_document(
+                &self.parent_path,
+                &self.collection_id,
+                &id.to_string(),
+                value,
+            )
+            .await
+    }
+
+    pub async fn list<T: TryFrom<Document>>(&self) -> storage::Result<Vec<T>> {
+        self.firestore
+            .list::<T>(&self.parent_path, &self.collection_id)
+            .await
+    }
+
+    pub async fn upsert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
+        let name = format!(
+            "{}/{}/{}",
+            self.parent_path,
+            self.collection_id,
+            id.to_string()
+        );
+        self.firestore.patch(&name, value).await
+    }
+}
+
 pub struct Firestore {
     client: Arc<Client<HttpsConnector<HttpConnector>>>,
-    firebase_project: String,
-    parent_path: String,
+    firebase_project_id: String,
     _oauth_token: Arc<RwLock<String>>,
     _oauth_refresh_handle: task::JoinHandle<()>,
     _oauth_refresh_cancellation: oneshot::Sender<()>,
 }
 
 impl Firestore {
-    pub async fn new<P: Into<PathBuf>>(
-        json_key_path: P,
-        parent_path: String,
-    ) -> storage::Result<Firestore> {
+    pub async fn new<P: Into<PathBuf>>(json_key_path: P) -> storage::Result<Firestore> {
         // Create shared HTTP client
         let mut https = HttpsConnector::new();
         https.https_only(true);
@@ -90,19 +163,15 @@ impl Firestore {
 
         Ok(Firestore {
             client,
-            firebase_project: json_key.project_id,
-            parent_path,
+            firebase_project_id: json_key.project_id,
             _oauth_token: oauth_token,
             _oauth_refresh_handle: handle,
             _oauth_refresh_cancellation: tx,
         })
     }
 
-    pub async fn delete<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<()> {
-        let uri = format!(
-            "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}/{}",
-            self.firebase_project, self.parent_path, id
-        );
+    pub async fn delete<T: TryFrom<Document>>(&self, name: &str) -> storage::Result<()> {
+        let uri = format!("https://firestore.googleapis.com/v1/{}", name);
         let req = Request::builder()
             .method(Method::DELETE)
             .uri(&uri)
@@ -131,11 +200,8 @@ impl Firestore {
         }
     }
 
-    pub async fn get<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<Option<T>> {
-        let uri = format!(
-            "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}/{}",
-            self.firebase_project, self.parent_path, id
-        );
+    pub async fn get<T: TryFrom<Document>>(&self, name: &str) -> storage::Result<Option<T>> {
+        let uri = format!("https://firestore.googleapis.com/v1/{}", name);
         let req = Request::builder()
             .method(Method::GET)
             .uri(&uri)
@@ -169,10 +235,16 @@ impl Firestore {
         }
     }
 
-    pub async fn insert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
+    pub async fn create_document<T: Into<Document>>(
+        &self,
+        parent: &str,
+        collection_id: &str,
+        document_id: &str,
+        value: T,
+    ) -> storage::Result<()> {
         let uri = format!(
-            "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?documentId={}",
-            self.firebase_project, self.parent_path, id
+            "https://firestore.googleapis.com/v1/{}/{}?documentId={}",
+            parent, collection_id, document_id
         );
         let doc: Document = value.into();
         let req = Request::builder()
@@ -197,14 +269,16 @@ impl Firestore {
         match status {
             StatusCode::OK => Ok(()),
             StatusCode::CONFLICT => Err(storage::Error::Conflict(format!(
-                "Value with id {} already exists under path '{}'",
-                id.to_string(),
-                self.parent_path
+                "Could not create document with id {} under parent '{}' collection '{}' as it already exists",
+                document_id,
+                parent,
+                collection_id,
             ))),
             _ => Err(storage::Error::Other(format!(
-                "Error inserting id {} under path '{}': HTTP {} {}",
-                id.to_string(),
-                self.parent_path,
+                "Error creating document with id {} under parent '{}' collection '{}': HTTP {} {}",
+                document_id,
+                parent,
+                collection_id,
                 status,
                 String::from_utf8(body_bytes.to_vec())
                     .unwrap_or_else(|_| "<mangled body>".to_owned()),
@@ -212,7 +286,11 @@ impl Firestore {
         }
     }
 
-    pub async fn list<T: TryFrom<Document>>(&self) -> storage::Result<Vec<T>> {
+    pub async fn list<T: TryFrom<Document>>(
+        &self,
+        parent: &str,
+        collection_id: &str,
+    ) -> storage::Result<Vec<T>> {
         const PAGE_SIZE: usize = 100;
         let mut ret = vec![];
         let mut next_page_token = None;
@@ -220,13 +298,13 @@ impl Firestore {
             let uri: String;
             if let Some(token) = next_page_token {
                 uri = format!(
-                    "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?pageSize={}&pageToken={}",
-                    self.firebase_project, self.parent_path, PAGE_SIZE, token
+                    "https://firestore.googleapis.com/v1/{}/{}?pageSize={}&pageToken={}",
+                    parent, collection_id, PAGE_SIZE, token
                 );
             } else {
                 uri = format!(
-                    "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}?pageSize={}",
-                    self.firebase_project, self.parent_path, PAGE_SIZE
+                    "https://firestore.googleapis.com/v1/{}/{}?pageSize={}",
+                    parent, collection_id, PAGE_SIZE
                 );
             }
 
@@ -276,12 +354,13 @@ impl Firestore {
         Ok(ret)
     }
 
-    pub async fn upsert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
-        // TODO return indication of whether it was an insert or an update
-        let uri = format!(
-            "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/documents/{}/{}",
-            self.firebase_project, self.parent_path, id
-        );
+    pub async fn patch<T: Into<Document>>(
+        &self,
+        document_name: &str,
+        value: T,
+    ) -> storage::Result<()> {
+        // TODO return indication of whether it was an insert or an update if possible
+        let uri = format!("https://firestore.googleapis.com/v1/{}", document_name);
         let doc: Document = value.into();
         let req = Request::builder()
             .method(Method::PATCH)
@@ -305,9 +384,8 @@ impl Firestore {
         match status {
             StatusCode::OK => Ok(()),
             _ => Err(storage::Error::Other(format!(
-                "Error upserting id {} under path '{}': HTTP {} {}",
-                id.to_string(),
-                self.parent_path,
+                "Error patching document '{}': HTTP {} {}",
+                document_name,
                 status,
                 String::from_utf8(body_bytes.to_vec())
                     .unwrap_or_else(|_| "<mangled body>".to_owned()),
@@ -522,9 +600,8 @@ mod tests {
     #[tokio::test(threaded_scheduler)]
     async fn test_upsert_then_get_card() {
         tokio::spawn(async {
-            let firestore = Firestore::new(JSON_KEY_PATH, "cards".to_owned())
-                .await
-                .unwrap();
+            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "cards".to_owned());
             let id_to_write = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
             let card_to_write = Card {
                 id: id_to_write.clone(),
@@ -553,9 +630,8 @@ mod tests {
     #[tokio::test(threaded_scheduler)]
     async fn test_upsert_then_get_user() {
         tokio::spawn(async {
-            let firestore = Firestore::new(JSON_KEY_PATH, "users".to_owned())
-                .await
-                .unwrap();
+            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "users".to_owned());
             let id_to_write = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
             let user_to_write = User {
                 id: id_to_write,
@@ -585,9 +661,8 @@ mod tests {
     #[tokio::test(threaded_scheduler)]
     async fn test_list_cards() {
         tokio::spawn(async {
-            let firestore = Firestore::new(JSON_KEY_PATH, "cards".to_owned())
-                .await
-                .unwrap();
+            let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "cards".to_owned());
             let cards: Vec<Card> = firestore.list().await.unwrap();
             assert!(cards.len() > 1);
         })

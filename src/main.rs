@@ -9,7 +9,7 @@ mod storage;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use storage::firestore::Firestore;
+use storage::firestore::{Firestore, FirestoreClient};
 use tokio::signal;
 
 #[tokio::main]
@@ -30,12 +30,10 @@ async fn main() {
     let config: models::config::Config = toml::from_str(&config_str).unwrap();
     let config = Arc::new(config);
 
-    let users_firestore = Firestore::new(&config.firestore.secret, "users".to_owned())
-        .await
-        .unwrap();
-    let cards_firestore = Firestore::new(&config.firestore.secret, "cards".to_owned())
-        .await
-        .unwrap();
+    let firestore = Arc::new(Firestore::new(&config.firestore.secret).await.unwrap());
+
+    let users_firestore = FirestoreClient::new(Arc::clone(&firestore), None, "users".to_owned());
+    let cards_firestore = FirestoreClient::new(Arc::clone(&firestore), None, "cards".to_owned());
 
     info!("Initialising engine api");
     let api = engine::Api::new(cards_firestore, users_firestore).await;

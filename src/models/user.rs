@@ -52,7 +52,7 @@ impl TryFrom<Document> for User {
                         let staged_card = match value.fields.get("staged_card") {
                             Some(DocumentField::StringValue(staged_id_str)) => {
                                 Some(Uuid::parse_str(staged_id_str).unwrap())
-                            },
+                            }
                             _ => None,
                         };
 
