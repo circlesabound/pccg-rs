@@ -4,17 +4,18 @@ use hyper::{
     body::{self, Body},
     client::{Client, HttpConnector},
     header::HeaderName,
-    Method,
-    Request,
-    StatusCode
+    Method, Request, StatusCode,
 };
 use hyper_tls::HttpsConnector;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use num::{Float, Integer};
 use serde::{Deserialize, Serialize};
 use std::{
+    any::type_name,
     collections::HashMap,
     convert::{TryFrom, TryInto},
     path::PathBuf,
+    str::FromStr,
     sync::Arc,
     time,
 };
@@ -379,11 +380,7 @@ impl Firestore {
         Ok(ret)
     }
 
-    async fn patch<T: Into<Document>>(
-        &self,
-        document_name: &str,
-        value: T,
-    ) -> storage::Result<()> {
+    async fn patch<T: Into<Document>>(&self, document_name: &str, value: T) -> storage::Result<()> {
         // TODO return indication of whether it was an insert or an update if possible
         let uri = format!("https://firestore.googleapis.com/v1/{}", document_name);
         let doc: Document = value.into();
@@ -460,6 +457,50 @@ impl Document {
             Err(format!("Invalid name '{}'", self.name))
         }
     }
+
+    pub fn extract_double<T: From<f64> + Float>(&self, field_name: &str) -> Result<T, String> {
+        if let Some(doc_field) = self.fields.get(field_name) {
+            if let DocumentField::DoubleValue(ret) = doc_field {
+                Ok((*ret).into())
+            } else {
+                Err(format!("Error parsing DoubleValue from {:?}", doc_field))
+            }
+        } else {
+            Err(format!("Missing field {}", field_name))
+        }
+    }
+
+    pub fn extract_integer<T: FromStr + Integer>(&self, field_name: &str) -> Result<T, String> {
+        if let Some(doc_field) = self.fields.get(field_name) {
+            if let DocumentField::IntegerValue(ret_str) = doc_field {
+                if let Ok(ret) = ret_str.parse() {
+                    Ok(ret)
+                } else {
+                    Err(format!(
+                        "Error casting to {} from {}",
+                        type_name::<T>(),
+                        ret_str
+                    ))
+                }
+            } else {
+                Err(format!("Error parsing IntegerValue from {:?}", doc_field))
+            }
+        } else {
+            Err(format!("Missing field {}", field_name))
+        }
+    }
+
+    pub fn extract_string(&self, field_name: &str) -> Result<String, String> {
+        if let Some(doc_field) = self.fields.get(field_name) {
+            if let DocumentField::StringValue(ret_str) = doc_field {
+                Ok(ret_str.to_string())
+            } else {
+                Err(format!("Error parsing StringValue from {:?}", doc_field))
+            }
+        } else {
+            Err(format!("Missing field {}", field_name))
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -467,8 +508,9 @@ impl Document {
 pub enum DocumentField {
     NullValue,
     ArrayValue(DocumentArrayValue),
-    DoubleValue(String),
+    DoubleValue(f64),
     IntegerValue(String),
+    MapValue(DocumentMapValue),
     StringValue(String),
     TimestampValue(DateTime<Utc>),
 }
@@ -477,6 +519,11 @@ pub enum DocumentField {
 #[serde(rename_all = "camelCase")]
 pub struct DocumentArrayValue {
     pub values: Option<Vec<DocumentField>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct DocumentMapValue {
+    pub fields: Option<HashMap<String, DocumentField>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -632,7 +679,10 @@ mod tests {
         fn try_from(value: Document) -> Result<Self, Self::Error> {
             let id = value.extract_id();
             if let Err(e) = id {
-                return Err(format!("Could not convert Document to TestItem: error parsing id: {}", e));
+                return Err(format!(
+                    "Could not convert Document to TestItem: error parsing id: {}",
+                    e
+                ));
             }
             let id = id.unwrap();
 
@@ -645,14 +695,18 @@ mod tests {
                     }
                 }
             } else {
-                return Err("Could not convert Document to TestItem: missing field 'number'".to_owned());
+                return Err(
+                    "Could not convert Document to TestItem: missing field 'number'".to_owned(),
+                );
             }
 
             let test_case;
             if let Some(DocumentField::StringValue(test_case_str)) = value.fields.get("test_case") {
                 test_case = test_case_str.to_string();
             } else {
-                return Err("Could not convert Document to TestItem: missing field 'test_case'".to_owned());
+                return Err(
+                    "Could not convert Document to TestItem: missing field 'test_case'".to_owned(),
+                );
             }
 
             Ok(TestItem {
@@ -666,9 +720,18 @@ mod tests {
     impl Into<Document> for TestItem {
         fn into(self) -> Document {
             let mut fields = HashMap::new();
-            fields.insert("id".to_owned(), DocumentField::StringValue(self.id.to_string()));
-            fields.insert("number".to_owned(), DocumentField::IntegerValue(self.number.to_string()));
-            fields.insert("test_case".to_owned(), DocumentField::StringValue(self.test_case));
+            fields.insert(
+                "id".to_owned(),
+                DocumentField::StringValue(self.id.to_string()),
+            );
+            fields.insert(
+                "number".to_owned(),
+                DocumentField::IntegerValue(self.number.to_string()),
+            );
+            fields.insert(
+                "test_case".to_owned(),
+                DocumentField::StringValue(self.test_case),
+            );
             Document::new(fields)
         }
     }
@@ -756,7 +819,11 @@ mod tests {
     async fn list_empty_collection() {
         tokio::spawn(async {
             let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test_list_empty_collection".to_owned());
+            let firestore = FirestoreClient::new(
+                Arc::new(firestore),
+                None,
+                "_test_list_empty_collection".to_owned(),
+            );
             let ret = firestore.list::<TestItem>().await.unwrap();
             assert_eq!(ret, vec![]);
         })
@@ -769,7 +836,11 @@ mod tests {
     async fn list_non_empty_collection() {
         tokio::spawn(async {
             let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test_list_non_empty_collection".to_owned());
+            let firestore = FirestoreClient::new(
+                Arc::new(firestore),
+                None,
+                "_test_list_non_empty_collection".to_owned(),
+            );
             let id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
             let test_item = TestItem {
                 id,

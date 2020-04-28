@@ -32,51 +32,16 @@ impl TryFrom<Document> for Character {
         let id = id.unwrap();
 
         let prototype_id;
-        if let Some(DocumentField::StringValue(prototype_id_str)) = value.fields.get("prototype_id")
-        {
-            match Uuid::parse_str(&prototype_id_str) {
-                Ok(uuid) => prototype_id = uuid,
-                Err(e) => {
-                    return Err(format!("Could not convert Document to Character: error parsing field 'prototype_id': {}", e));
-                }
-            }
-        } else {
-            return Err(
-                "Could not convert Document to Character: missing field 'prototype_id'".to_owned(),
-            );
+        match Uuid::parse_str(&value.extract_string("prototype_id")?) {
+            Ok(id) => prototype_id = id,
+            Err(e) => return Err(format!(
+                "Could not convert Document to Character: error parsing field 'prototype_id': {}",
+                e
+            )),
         }
 
-        let level;
-        if let Some(DocumentField::IntegerValue(level_str)) = value.fields.get("level") {
-            match level_str.parse() {
-                Ok(l) => level = l,
-                Err(e) => {
-                    return Err(format!(
-                        "Could not convert Document to Character: error parsing field 'level': {}",
-                        e
-                    ))
-                }
-            }
-        } else {
-            return Err(
-                "Could not convert Document to Character: missing field 'level'".to_owned(),
-            );
-        }
-
-        let experience;
-        if let Some(DocumentField::IntegerValue(experience_str)) = value.fields.get("experience") {
-            match experience_str.parse() {
-                Ok(l) => experience = l,
-                Err(e) => return Err(format!(
-                    "Could not convert Document to Character: error parsing field 'experience': {}",
-                    e
-                )),
-            }
-        } else {
-            return Err(
-                "Could not convert Document to Character: missing field 'experience'".to_owned(),
-            );
-        }
+        let level = value.extract_integer("level")?;
+        let experience = value.extract_integer("experience")?;
 
         Ok(Character {
             id,
