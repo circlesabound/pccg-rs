@@ -1,13 +1,22 @@
 use crate::storage::firestore::{Document, DocumentField};
-use std::{collections::HashMap, convert::TryFrom};
+use std::{collections::HashMap, convert::{TryInto, TryFrom}, sync::Arc};
+use super::{card::StatsF, Card};
 use uuid::Uuid;
+use tokio::sync::Mutex;
 
-#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Character {
     pub id: Uuid,
     pub prototype_id: Uuid,
     pub level: u32,
     pub experience: u32,
+    #[serde(skip)]
+    #[serde(default = "default_prototype_field")]
+    prototype: Arc<Mutex<Option<Card>>>,
+}
+
+fn default_prototype_field() -> Arc<Mutex<Option<Card>>> {
+    Arc::new(Mutex::new(None))
 }
 
 impl Character {
@@ -17,7 +26,26 @@ impl Character {
             prototype_id,
             level: 1,
             experience: 0,
+            prototype: default_prototype_field(),
         }
+    }
+
+    pub async fn expand(&self, prototype: Card) {
+        if prototype.id != self.prototype_id {
+            panic!("id mismatch! self.prototype_id = {}, prototype.id = {}", self.prototype_id, prototype.id)
+        }
+
+        let mut lock = self.prototype.lock().await;
+        *lock = Some(prototype);
+    }
+}
+
+impl PartialEq for Character {
+    fn eq(&self, other: &Character) -> bool {
+        self.id == other.id &&
+            self.prototype_id == other.prototype_id &&
+            self.level == other.level &&
+            self.experience == other.experience
     }
 }
 
@@ -48,6 +76,7 @@ impl TryFrom<Document> for Character {
             prototype_id,
             level,
             experience,
+            prototype: default_prototype_field(),
         })
     }
 }
@@ -71,10 +100,52 @@ impl Into<Document> for Character {
     }
 }
 
+#[derive(serde::Serialize)]
+pub struct CharacterEx {
+    pub id: Uuid,
+    pub name: String,
+    pub description: String,
+    pub image_uri: String,
+    pub level: u32,
+    pub experience: u32,
+    pub stats: StatsF,
+}
+
+impl CharacterEx {
+    pub async fn new(character: Character, prototype: Card) -> CharacterEx {
+        character.expand(prototype).await;
+        character.try_into().unwrap()
+    }
+}
+
+impl TryFrom<Character> for CharacterEx {
+    type Error = String;
+
+    fn try_from(value: Character) -> Result<Self, Self::Error> {
+        if let Some(prototype) = Arc::try_unwrap(value.prototype).unwrap().into_inner() {
+            let stats = StatsF {
+                physical: prototype.stat_base.physical as f64 + value.level as f64 * prototype.stat_multiplier.physical,
+                mental: prototype.stat_base.mental as f64 + value.level as f64 * prototype.stat_multiplier.mental,
+                tactical: prototype.stat_base.tactical as f64 + value.level as f64 * prototype.stat_multiplier.tactical,
+            };
+            Ok(CharacterEx {
+                id: value.id,
+                name: prototype.name,
+                description: prototype.description,
+                image_uri: prototype.image_uri,
+                level: value.level,
+                experience: value.experience,
+                stats,
+            })
+        } else {
+            Err("Could not expand Character, no prototype".to_owned())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::convert::TryInto;
 
     #[test]
     fn can_convert_between_document_and_character() {

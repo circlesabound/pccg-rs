@@ -7,4 +7,4 @@ mod user;
 pub use self::user::User;
 
 mod character;
-pub use self::character::Character;
+pub use self::character::{Character, CharacterEx};

@@ -47,7 +47,7 @@ pub struct DrawCardToStageForUserResponse {
 
 #[derive(Serialize)]
 pub struct ListCharactersForUserResponse {
-    pub characters: Vec<models::Character>,
+    pub characters: Vec<models::CharacterEx>,
 }
 
 pub type ListCardsFromCompendiumResponse = Vec<Uuid>;

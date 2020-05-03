@@ -1,11 +1,12 @@
 use crate::{
     engine::{self, constants, ErrorCode},
-    models::{Card, Character, User},
+    models::{Card, Character, User, CharacterEx},
     storage::firestore::FirestoreClient,
 };
 use chrono::Utc;
 use rand::Rng;
 use uuid::Uuid;
+use std::convert::TryInto;
 
 pub struct Api {
     cards: FirestoreClient,
@@ -111,7 +112,7 @@ impl Api {
         Ok(self.cards.get::<Card>(card_id).await?)
     }
 
-    pub async fn get_characters_for_user(&self, user_id: &Uuid) -> engine::Result<Vec<Character>> {
+    pub async fn get_characters_for_user(&self, user_id: &Uuid) -> engine::Result<Vec<CharacterEx>> {
         match self.get_user_by_id(user_id).await? {
             Some(_) => {
                 let fs = FirestoreClient::new_for_subcollection(
@@ -120,7 +121,13 @@ impl Api {
                     "characters".to_owned(),
                 );
 
-                Ok(fs.list::<Character>().await?)
+                let characters = fs.list::<Character>().await?;
+                for ch in characters.iter() {
+                    let prototype = self.cards.get(&ch.prototype_id).await?.unwrap();
+                    ch.expand(prototype).await;
+                }
+
+                Ok(characters.into_iter().map(|ch| ch.try_into().unwrap()).collect())
             }
             None => Err(engine::Error::new(ErrorCode::UserNotFound, None)),
         }
@@ -130,14 +137,25 @@ impl Api {
         &self,
         user_id: &Uuid,
         character_id: &Uuid,
-    ) -> engine::Result<Option<Character>> {
+    ) -> engine::Result<Option<CharacterEx>> {
         let fs = FirestoreClient::new_for_subcollection(
             &self.users,
             user_id.to_string(),
             "characters".to_owned(),
         );
 
-        Ok(fs.get::<Character>(character_id).await?)
+        let character = fs.get::<Character>(character_id).await?;
+        if let Some(character) = character {
+            match self.users.get::<Card>(&character.prototype_id).await? {
+                Some(prototype) => Ok(Some(CharacterEx::new(character, prototype).await)),
+                None => {
+                    error!("prototype with id {} not found", character.prototype_id);
+                    Err(engine::Error::new(ErrorCode::Other,None))
+                },
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn get_random_card(&self) -> engine::Result<Card> {

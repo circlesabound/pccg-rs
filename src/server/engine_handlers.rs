@@ -214,9 +214,9 @@ pub async fn list_characters_for_user(
     info!("Handling: list_characters_for_user");
 
     match api.get_characters_for_user(&user_id).await {
-        Ok(card_ids) => Ok(reply::with_status(
+        Ok(characters) => Ok(reply::with_status(
             reply::json(&schemas::ListCharactersForUserResponse {
-                characters: card_ids,
+                characters,
             }),
             StatusCode::OK,
         )),
