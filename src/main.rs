@@ -32,11 +32,24 @@ async fn main() {
 
     let firestore = Arc::new(Firestore::new(&config.firestore.secret).await.unwrap());
 
-    let users_firestore = FirestoreClient::new(Arc::clone(&firestore), None, "users".to_owned());
-    let cards_firestore = FirestoreClient::new(Arc::clone(&firestore), None, "cards".to_owned());
+    let users_firestore = FirestoreClient::new(
+        Arc::clone(&firestore),
+        None,
+        "users".to_owned()
+    );
+    let job_board = engine::job_board::JobBoard::new(FirestoreClient::new(
+        Arc::clone(&firestore),
+        None,
+        "jobs".to_owned(),
+    )).await;
+    let cards_firestore = FirestoreClient::new(
+        Arc::clone(&firestore),
+        None,
+        "cards".to_owned()
+    );
 
     info!("Initialising engine api");
-    let api = engine::Api::new(cards_firestore, users_firestore).await;
+    let api = engine::Api::new(cards_firestore, job_board, users_firestore).await;
     let api = Arc::new(api);
 
     info!("Starting web server");

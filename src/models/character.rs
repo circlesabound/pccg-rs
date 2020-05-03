@@ -1,8 +1,13 @@
+use crate::models::stats::StatsF;
+use crate::models::Card;
 use crate::storage::firestore::{Document, DocumentField};
-use std::{collections::HashMap, convert::{TryInto, TryFrom}, sync::Arc};
-use super::{card::StatsF, Card};
-use uuid::Uuid;
+use std::{
+    collections::HashMap,
+    convert::{TryFrom, TryInto},
+    sync::Arc,
+};
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Character {
@@ -32,7 +37,10 @@ impl Character {
 
     pub async fn expand(&self, prototype: Card) {
         if prototype.id != self.prototype_id {
-            panic!("id mismatch! self.prototype_id = {}, prototype.id = {}", self.prototype_id, prototype.id)
+            panic!(
+                "id mismatch! self.prototype_id = {}, prototype.id = {}",
+                self.prototype_id, prototype.id
+            )
         }
 
         let mut lock = self.prototype.lock().await;
@@ -42,10 +50,10 @@ impl Character {
 
 impl PartialEq for Character {
     fn eq(&self, other: &Character) -> bool {
-        self.id == other.id &&
-            self.prototype_id == other.prototype_id &&
-            self.level == other.level &&
-            self.experience == other.experience
+        self.id == other.id
+            && self.prototype_id == other.prototype_id
+            && self.level == other.level
+            && self.experience == other.experience
     }
 }
 
@@ -62,10 +70,12 @@ impl TryFrom<Document> for Character {
         let prototype_id;
         match Uuid::parse_str(&value.extract_string("prototype_id")?) {
             Ok(id) => prototype_id = id,
-            Err(e) => return Err(format!(
+            Err(e) => {
+                return Err(format!(
                 "Could not convert Document to Character: error parsing field 'prototype_id': {}",
                 e
-            )),
+            ))
+            }
         }
 
         let level = value.extract_integer("level")?;
@@ -124,9 +134,12 @@ impl TryFrom<Character> for CharacterEx {
     fn try_from(value: Character) -> Result<Self, Self::Error> {
         if let Some(prototype) = Arc::try_unwrap(value.prototype).unwrap().into_inner() {
             let stats = StatsF {
-                physical: prototype.stat_base.physical as f64 + value.level as f64 * prototype.stat_multiplier.physical,
-                mental: prototype.stat_base.mental as f64 + value.level as f64 * prototype.stat_multiplier.mental,
-                tactical: prototype.stat_base.tactical as f64 + value.level as f64 * prototype.stat_multiplier.tactical,
+                physical: prototype.stat_base.physical as f64
+                    + value.level as f64 * prototype.stat_multiplier.physical,
+                mental: prototype.stat_base.mental as f64
+                    + value.level as f64 * prototype.stat_multiplier.mental,
+                tactical: prototype.stat_base.tactical as f64
+                    + value.level as f64 * prototype.stat_multiplier.tactical,
             };
             Ok(CharacterEx {
                 id: value.id,

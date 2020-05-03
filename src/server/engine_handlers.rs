@@ -2,7 +2,7 @@ use super::schemas;
 use crate::engine;
 
 use engine::api::AddOrUpdateOperation;
-use engine::{ErrorCategory, ErrorCode};
+use engine::{ErrorCategory, ErrorCode, job_board::JobTier};
 use std::sync::Arc;
 use uuid::Uuid;
 use warp::http::StatusCode;
@@ -207,6 +207,32 @@ pub async fn get_user_from_registry(
     }
 }
 
+pub async fn list_available_jobs(
+    tier: String,
+    api: Arc<engine::Api>,
+) -> Result<impl Reply, Rejection> {
+    info!("Handling: list_available_jobs");
+
+    let job_tier = match tier.as_str() {
+        "beginner" => Some(JobTier::Beginner),
+        "intermediate" => Some(JobTier::Intermediate),
+        "expert" => Some(JobTier::Expert),
+        _ => None,
+    };
+
+    if let Some(tier) = job_tier {
+        match api.list_available_jobs(&tier).await {
+            Ok(jobs) => Ok(reply::with_status(reply::json(&jobs), StatusCode::OK)),
+            Err(e) => Err(reject::custom(EngineError {
+                error: e,
+                status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            }))
+        }
+    } else {
+        Err(reject::not_found())
+    }
+}
+
 pub async fn list_characters_for_user(
     user_id: Uuid,
     api: Arc<engine::Api>,
@@ -215,9 +241,7 @@ pub async fn list_characters_for_user(
 
     match api.get_characters_for_user(&user_id).await {
         Ok(characters) => Ok(reply::with_status(
-            reply::json(&schemas::ListCharactersForUserResponse {
-                characters,
-            }),
+            reply::json(&schemas::ListCharactersForUserResponse { characters }),
             StatusCode::OK,
         )),
         Err(e) => Err(reject::custom(EngineError::new(e))),

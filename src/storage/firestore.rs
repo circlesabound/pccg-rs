@@ -501,6 +501,18 @@ impl Document {
             Err(format!("Missing field {}", field_name))
         }
     }
+
+    pub fn extract_timestamp(&self, field_name: &str) -> Result<DateTime<Utc>, String> {
+        if let Some(doc_field) = self.fields.get(field_name) {
+            if let DocumentField::TimestampValue(dt) = doc_field {
+                Ok(*dt)
+            } else {
+                Err(format!("Error parsing TimestampValue from {:?}", doc_field))
+            }
+        } else {
+            Err(format!("Missing field {}", field_name))
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -799,7 +811,7 @@ mod tests {
     async fn upsert_then_get() {
         tokio::spawn(async {
             let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-            let firestore = FirestoreClient::new(Arc::new(firestore), None, "test".to_owned());
+            let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
             let id = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
             let test_item = TestItem {
                 id,

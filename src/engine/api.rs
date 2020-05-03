@@ -1,21 +1,23 @@
 use crate::{
-    engine::{self, constants, ErrorCode},
-    models::{Card, Character, User, CharacterEx},
+    engine::{self, constants, ErrorCode, job_board::JobBoard},
+    models::{Card, Character, CharacterEx, User, JobPrototype},
     storage::firestore::FirestoreClient,
 };
 use chrono::Utc;
 use rand::Rng;
-use uuid::Uuid;
 use std::convert::TryInto;
+use uuid::Uuid;
+use engine::job_board::JobTier;
 
 pub struct Api {
     cards: FirestoreClient,
+    job_board: JobBoard,
     users: FirestoreClient,
 }
 
 impl Api {
-    pub async fn new(cards: FirestoreClient, users: FirestoreClient) -> Api {
-        Api { cards, users }
+    pub async fn new(cards: FirestoreClient, job_board: JobBoard, users: FirestoreClient) -> Api {
+        Api { cards, job_board, users }
     }
 
     pub async fn add_new_user(&self, user_id: &Uuid) -> engine::Result<()> {
@@ -112,7 +114,10 @@ impl Api {
         Ok(self.cards.get::<Card>(card_id).await?)
     }
 
-    pub async fn get_characters_for_user(&self, user_id: &Uuid) -> engine::Result<Vec<CharacterEx>> {
+    pub async fn get_characters_for_user(
+        &self,
+        user_id: &Uuid,
+    ) -> engine::Result<Vec<CharacterEx>> {
         match self.get_user_by_id(user_id).await? {
             Some(_) => {
                 let fs = FirestoreClient::new_for_subcollection(
@@ -127,7 +132,10 @@ impl Api {
                     ch.expand(prototype).await;
                 }
 
-                Ok(characters.into_iter().map(|ch| ch.try_into().unwrap()).collect())
+                Ok(characters
+                    .into_iter()
+                    .map(|ch| ch.try_into().unwrap())
+                    .collect())
             }
             None => Err(engine::Error::new(ErrorCode::UserNotFound, None)),
         }
@@ -150,12 +158,19 @@ impl Api {
                 Some(prototype) => Ok(Some(CharacterEx::new(character, prototype).await)),
                 None => {
                     error!("prototype with id {} not found", character.prototype_id);
-                    Err(engine::Error::new(ErrorCode::Other,None))
-                },
+                    Err(engine::Error::new(ErrorCode::Other, None))
+                }
             }
         } else {
             Ok(None)
         }
+    }
+
+    pub async fn list_available_jobs(
+        &self,
+        tier: &JobTier
+    ) -> engine::Result<Vec<JobPrototype>> {
+        Ok(self.job_board.list_available_jobs(tier).await)
     }
 
     pub async fn get_random_card(&self) -> engine::Result<Card> {
@@ -294,9 +309,22 @@ mod tests {
     async fn claim_daily_increases_currency_only_once() {
         tokio::spawn(async {
             let fs = Arc::new(Firestore::new(JSON_KEY_PATH).await.unwrap());
-            let cards = FirestoreClient::new(Arc::clone(&fs), None, "_test_cards".to_owned());
-            let users = FirestoreClient::new(Arc::clone(&fs), None, "_test_users".to_owned());
-            let api = Arc::new(Api::new(cards, users).await);
+            let cards = FirestoreClient::new(
+                Arc::clone(&fs),
+                None,
+                "_test_cards".to_owned()
+            );
+            let users = FirestoreClient::new(
+                Arc::clone(&fs),
+                None,
+                "_test_users".to_owned()
+            );
+            let job_board = JobBoard::new(FirestoreClient::new(
+                Arc::clone(&fs),
+                None,
+                "_test_jobs".to_owned(),
+            )).await;
+            let api = Arc::new(Api::new(cards, job_board, users).await);
 
             // Add a new user
             let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();

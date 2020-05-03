@@ -21,6 +21,7 @@ pub enum ErrorCode {
     DrawStagePopulated,
     IdMismatch,
     InsufficientFunds,
+    JobNotFound,
     Other,
     Storage,
     UserNotFound,
@@ -33,9 +34,10 @@ impl Error {
 
     pub fn classify(&self) -> ErrorCategory {
         match self.code {
-            ErrorCode::CardNotFound | ErrorCode::IdMismatch | ErrorCode::UserNotFound => {
-                ErrorCategory::BadRequest
-            }
+            ErrorCode::CardNotFound
+            | ErrorCode::IdMismatch
+            | ErrorCode::JobNotFound
+            | ErrorCode::UserNotFound => ErrorCategory::BadRequest,
             ErrorCode::CompendiumEmpty | ErrorCode::Other | ErrorCode::Storage => {
                 ErrorCategory::Internal
             }
