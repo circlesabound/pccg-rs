@@ -458,13 +458,9 @@ impl Document {
         }
     }
 
-    pub fn extract_double<T: From<f64> + Float>(&self, field_name: &str) -> Result<T, String> {
+    pub fn extract_double<T: From<f64> + From<i32> + Float>(&self, field_name: &str) -> Result<T, String> {
         if let Some(doc_field) = self.fields.get(field_name) {
-            if let DocumentField::DoubleValue(ret) = doc_field {
-                Ok((*ret).into())
-            } else {
-                Err(format!("Error parsing DoubleValue from {:?}", doc_field))
-            }
+            doc_field.extract_double()
         } else {
             Err(format!("Missing field {}", field_name))
         }
@@ -472,19 +468,7 @@ impl Document {
 
     pub fn extract_integer<T: FromStr + Integer>(&self, field_name: &str) -> Result<T, String> {
         if let Some(doc_field) = self.fields.get(field_name) {
-            if let DocumentField::IntegerValue(ret_str) = doc_field {
-                if let Ok(ret) = ret_str.parse() {
-                    Ok(ret)
-                } else {
-                    Err(format!(
-                        "Error casting to {} from {}",
-                        type_name::<T>(),
-                        ret_str
-                    ))
-                }
-            } else {
-                Err(format!("Error parsing IntegerValue from {:?}", doc_field))
-            }
+            doc_field.extract_integer()
         } else {
             Err(format!("Missing field {}", field_name))
         }
@@ -492,11 +476,7 @@ impl Document {
 
     pub fn extract_string(&self, field_name: &str) -> Result<String, String> {
         if let Some(doc_field) = self.fields.get(field_name) {
-            if let DocumentField::StringValue(ret_str) = doc_field {
-                Ok(ret_str.to_string())
-            } else {
-                Err(format!("Error parsing StringValue from {:?}", doc_field))
-            }
+            doc_field.extract_string()
         } else {
             Err(format!("Missing field {}", field_name))
         }
@@ -504,11 +484,7 @@ impl Document {
 
     pub fn extract_timestamp(&self, field_name: &str) -> Result<DateTime<Utc>, String> {
         if let Some(doc_field) = self.fields.get(field_name) {
-            if let DocumentField::TimestampValue(dt) = doc_field {
-                Ok(*dt)
-            } else {
-                Err(format!("Error parsing TimestampValue from {:?}", doc_field))
-            }
+            doc_field.extract_timestamp()
         } else {
             Err(format!("Missing field {}", field_name))
         }
@@ -525,6 +501,60 @@ pub enum DocumentField {
     MapValue(DocumentMapValue),
     StringValue(String),
     TimestampValue(DateTime<Utc>),
+}
+
+impl DocumentField {
+    pub fn extract_double<T: From<f64> + From<i32> + Float>(&self) -> Result<T, String> {
+        if let DocumentField::DoubleValue(ret) = self {
+            Ok((*ret).into())
+        } else if let DocumentField::IntegerValue(ret_str) = self {
+            // Firestore is dumb and casts integral double values back into IntegerValues
+            // Just use i32 here
+            if let Ok(ret) = ret_str.parse::<i32>() {
+                Ok(ret.into())
+            } else {
+                Err(format!(
+                    "Error casting to {} from value {}",
+                    type_name::<T>(),
+                    ret_str
+                ))
+            }
+        } else {
+            Err(format!("Error parsing DoubleValue from {:?}", self))
+        }
+    }
+
+    pub fn extract_integer<T: FromStr + Integer>(&self) -> Result<T, String> {
+        if let DocumentField::IntegerValue(ret_str) = self {
+            if let Ok(ret) = ret_str.parse() {
+                Ok(ret)
+            } else {
+                Err(format!(
+                    "Error casting to {} from value {}",
+                    type_name::<T>(),
+                    ret_str
+                ))
+            }
+        } else {
+            Err(format!("Error parsing IntegerValue from {:?}", self))
+        }
+    }
+
+    pub fn extract_string(&self) -> Result<String, String> {
+            if let DocumentField::StringValue(ret_str) = self {
+                Ok(ret_str.to_string())
+            } else {
+                Err(format!("Error parsing StringValue from {:?}", self))
+            }
+    }
+
+    pub fn extract_timestamp(&self) -> Result<DateTime<Utc>, String> {
+        if let DocumentField::TimestampValue(dt) = self {
+            Ok(*dt)
+        } else {
+            Err(format!("Error parsing TimestampValue from {:?}", self))
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]

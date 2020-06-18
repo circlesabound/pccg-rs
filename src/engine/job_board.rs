@@ -37,6 +37,7 @@ impl JobBoard {
                 let current_date = chrono::Utc::now().date();
                 let mut _refresh_jobs_last_checked_clone =
                     _refresh_jobs_last_checked_clone.lock().await;
+                // Refresh on day roll over
                 if *_refresh_jobs_last_checked_clone < current_date {
                     info!("Generating jobs for {}", current_date);
                     if let Err(e) = JobBoard::generate_jobs(

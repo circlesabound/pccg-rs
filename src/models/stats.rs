@@ -25,51 +25,22 @@ impl TryFrom<&DocumentField> for StatsI {
             let tactical;
             if let Some(fields) = &dmv.fields {
                 if let Some(doc_field) = fields.get("physical") {
-                    if let DocumentField::IntegerValue(ret_str) = doc_field {
-                        if let Ok(ret) = ret_str.parse() {
-                            physical = ret;
-                        } else {
-                            return Err(format!("Error casting to i32 from {}", ret_str));
-                        }
-                    } else {
-                        return Err(format!("Error parsing IntegerValue from {:?}", doc_field));
-                    }
+                    physical = doc_field.extract_integer()?;
                 } else {
                     return Err(format!("Missing field 'physical' in map"));
                 }
                 if let Some(doc_field) = fields.get("mental") {
-                    if let DocumentField::IntegerValue(ret_str) = doc_field {
-                        if let Ok(ret) = ret_str.parse() {
-                            mental = ret;
-                        } else {
-                            return Err(format!("Error casting to i32 from {}", ret_str));
-                        }
-                    } else {
-                        return Err(format!("Error parsing IntegerValue from {:?}", doc_field));
-                    }
+                    mental = doc_field.extract_integer()?;
                 } else {
                     return Err(format!("Missing field 'mental' in map"));
                 }
                 if let Some(doc_field) = fields.get("tactical") {
-                    if let DocumentField::IntegerValue(ret_str) = doc_field {
-                        if let Ok(ret) = ret_str.parse() {
-                            tactical = ret;
-                        } else {
-                            return Err(format!("Error casting to i32 from {}", ret_str));
-                        }
-                    } else {
-                        return Err(format!("Error parsing IntegerValue from {:?}", doc_field));
-                    }
+                    tactical = doc_field.extract_integer()?;
                 } else {
                     return Err(format!("Missing field 'tactical' in map"));
                 }
             } else {
-                warn!(
-                    "Missing hashmap fields converting DocumentMapValue to StatsI, using defaults"
-                );
-                physical = Default::default();
-                mental = Default::default();
-                tactical = Default::default();
+                return Err("Missing hashmap fields converting DocumentMapValue to StatsI, using defaults".to_owned());
             }
 
             Ok(StatsI {
@@ -116,39 +87,22 @@ impl TryFrom<&DocumentField> for StatsF {
         if let DocumentField::MapValue(dmv) = value {
             if let Some(fields) = &dmv.fields {
                 if let Some(doc_field) = fields.get("physical") {
-                    if let DocumentField::DoubleValue(ret) = doc_field {
-                        physical = *ret;
-                    } else {
-                        return Err(format!("Error parsing DoubleValue from {:?}", doc_field));
-                    }
+                    physical = doc_field.extract_double()?;
                 } else {
                     return Err(format!("Missing field 'physical' in map"));
                 }
                 if let Some(doc_field) = fields.get("mental") {
-                    if let DocumentField::DoubleValue(ret) = doc_field {
-                        mental = *ret;
-                    } else {
-                        return Err(format!("Error parsing DoubleValue from {:?}", doc_field));
-                    }
+                    mental = doc_field.extract_double()?;
                 } else {
                     return Err(format!("Missing field 'mental' in map"));
                 }
                 if let Some(doc_field) = fields.get("tactical") {
-                    if let DocumentField::DoubleValue(ret) = doc_field {
-                        tactical = *ret;
-                    } else {
-                        return Err(format!("Error parsing DoubleValue from {:?}", doc_field));
-                    }
+                    tactical = doc_field.extract_double()?;
                 } else {
                     return Err(format!("Missing field 'tactical' in map"));
                 }
             } else {
-                warn!(
-                    "Missing hashmap fields converting DocumentMapValue to StatsF, using defaults"
-                );
-                physical = Default::default();
-                mental = Default::default();
-                tactical = Default::default();
+                return Err("Missing hashmap fields converting DocumentMapValue to StatsF, using defaults".to_owned());
             }
 
             Ok(StatsF {
