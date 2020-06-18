@@ -305,6 +305,24 @@ pub async fn put_card_to_compendium(
     }
 }
 
+pub async fn take_job(
+    user_id: Uuid,
+    api: Arc<engine::Api>,
+    body: schemas::TakeJobRequest,
+) -> Result<impl Reply, Rejection> {
+    info!("Handling: take_job");
+
+    match api.take_job(user_id, &body.job_prototype_id, body.character_ids).await {
+        Ok(job) => {
+            Ok(reply::with_status(reply::json(&job), StatusCode::OK))
+        },
+        Err(e) => Err(reject::custom(EngineError {
+            error: e,
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        }))
+    }
+}
+
 fn get_http_code(error: &engine::Error) -> http::StatusCode {
     match error.classify() {
         ErrorCategory::BadRequest => StatusCode::BAD_REQUEST,

@@ -541,11 +541,11 @@ impl DocumentField {
     }
 
     pub fn extract_string(&self) -> Result<String, String> {
-            if let DocumentField::StringValue(ret_str) = self {
-                Ok(ret_str.to_string())
-            } else {
-                Err(format!("Error parsing StringValue from {:?}", self))
-            }
+        if let DocumentField::StringValue(ret_str) = self {
+            Ok(ret_str.to_string())
+        } else {
+            Err(format!("Error parsing StringValue from {:?}", self))
+        }
     }
 
     pub fn extract_timestamp(&self) -> Result<DateTime<Utc>, String> {

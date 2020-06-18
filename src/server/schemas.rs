@@ -29,6 +29,12 @@ pub struct PutCardToCompendiumRequest {
     pub card: models::Card,
 }
 
+#[derive(Deserialize)]
+pub struct TakeJobRequest {
+    pub job_prototype_id: Uuid,
+    pub character_ids: Vec<Uuid>,
+}
+
 // ####################
 // # Response schemas #
 // ####################

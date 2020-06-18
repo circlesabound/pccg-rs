@@ -14,6 +14,7 @@ use tokio::{
         Mutex,
     },
     task,
+    time::Duration,
 };
 use uuid::Uuid;
 
@@ -54,7 +55,7 @@ impl JobBoard {
                 } else {
                     debug!("Jobs already generated for {}", current_date);
                 }
-                tokio::time::delay_for(tokio::time::Duration::from_secs(60)).await;
+                tokio::time::delay_for(Duration::from_secs(60)).await;
             }
         });
 
@@ -66,17 +67,12 @@ impl JobBoard {
         }
     }
 
-    pub async fn list_available_jobs(&self, tier: &JobTier) -> Vec<JobPrototype> {
-        match self.available_jobs_cache.get(tier) {
-            Some(jobs) => (*jobs).clone(),
-            None => {
-                warn!("No available jobs!");
-                vec![]
-            }
-        }
-    }
-
-    pub async fn create_job_from_prototype(&self, prototype_id: &Uuid) -> engine::Result<Job> {
+    pub async fn create_job(
+        &self,
+        prototype_id: &Uuid,
+        user_id: Uuid,
+        character_ids: Vec<Uuid>,
+    ) -> engine::Result<Job> {
         let beginner = self.available_jobs_cache.get(&JobTier::Beginner).unwrap();
         let intermediate = self
             .available_jobs_cache
@@ -91,10 +87,20 @@ impl JobBoard {
             .find(|p| p.id == *prototype_id)
         {
             Some(prototype) => {
-                let job = Job::new(prototype);
+                let job = Job::new(prototype, user_id, character_ids);
                 Ok(job)
             }
             None => Err(engine::Error::new(ErrorCode::JobNotFound, None)),
+        }
+    }
+
+    pub async fn list_available_jobs(&self, tier: &JobTier) -> Vec<JobPrototype> {
+        match self.available_jobs_cache.get(tier) {
+            Some(jobs) => (*jobs).clone(),
+            None => {
+                warn!("No available jobs!");
+                vec![]
+            }
         }
     }
 

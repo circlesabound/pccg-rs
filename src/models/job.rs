@@ -1,5 +1,5 @@
 use super::stats::StatsF;
-use crate::storage::firestore::{Document, DocumentField};
+use crate::storage::firestore::{Document, DocumentArrayValue, DocumentField};
 use chrono::{DateTime, Utc};
 use std::{
     collections::HashMap,
@@ -15,17 +15,26 @@ pub struct Job {
     pub description: String,
     pub recommended_stats: StatsF,
     pub completion_time: DateTime<Utc>,
+
+    pub user_id: Uuid,
+    pub character_ids: Vec<Uuid>,
 }
 
 impl Job {
-    pub fn new(prototype: &JobPrototype) -> Job {
+    pub fn new(prototype: &JobPrototype, user_id: Uuid, character_ids: Vec<Uuid>) -> Job {
         Job {
             id: Uuid::new_v4(),
             name: prototype.name.clone(),
             description: prototype.description.clone(),
             recommended_stats: prototype.recommended_stats.clone(),
             completion_time: Utc::now() + chrono::Duration::minutes(prototype.duration_mins as i64),
+            user_id,
+            character_ids,
         }
+    }
+
+    pub fn can_complete(&self) -> bool {
+        self.completion_time > Utc::now()
     }
 }
 
@@ -36,13 +45,23 @@ impl TryFrom<Document> for Job {
         let id = value.extract_id()?;
         let name = value.extract_string("name")?;
         let description = value.extract_string("description")?;
-        let recommended_stats;
-        if let Some(df) = value.fields.get("recommended_stats") {
-            recommended_stats = df.try_into()?;
-        } else {
-            return Err(format!("Missing field 'recommended_stats'"));
-        }
+        let recommended_stats = value.fields.get("recommended_stats")
+            .ok_or_else(|| format!("Missing field 'recommended_stats'"))?
+            .try_into()?;
         let completion_time = value.extract_timestamp("completion_time")?;
+
+        let user_id_str = value.extract_string("user_id")?;
+        let user_id = Uuid::parse_str(&user_id_str).unwrap();
+        let character_ids = match value.fields.get("character_ids")
+            .ok_or_else(|| format!("Missing field 'character_ids"))? {
+            DocumentField::ArrayValue(dav) => {
+                dav.values.as_ref().unwrap()
+                    .into_iter()
+                    .map(|df| Uuid::parse_str(&df.extract_string().unwrap()).unwrap())
+                    .collect()
+            },
+            df => return Err(format!("Error parsing ArrayValue from {:?}", df))
+        };
 
         Ok(Job {
             id,
@@ -50,6 +69,8 @@ impl TryFrom<Document> for Job {
             description,
             recommended_stats,
             completion_time,
+            user_id,
+            character_ids,
         })
     }
 }
@@ -69,6 +90,13 @@ impl Into<Document> for Job {
         fields.insert(
             "completion_time".to_owned(),
             DocumentField::TimestampValue(self.completion_time),
+        );
+        fields.insert("user_id".to_owned(), DocumentField::StringValue(self.user_id.to_string()));
+        fields.insert(
+            "character_ids".to_owned(),
+            DocumentField::ArrayValue(DocumentArrayValue {
+                values: Some(self.character_ids.into_iter().map(|id| DocumentField::StringValue(id.to_string())).collect())
+            }),
         );
         Document::new(fields)
     }
@@ -98,12 +126,9 @@ impl TryFrom<Document> for JobPrototype {
         let id = value.extract_id()?;
         let name = value.extract_string("name")?;
         let description = value.extract_string("description")?;
-        let recommended_stats;
-        if let Some(df) = value.fields.get("recommended_stats") {
-            recommended_stats = df.try_into()?;
-        } else {
-            return Err(format!("Missing field 'recommended_stats'"));
-        }
+        let recommended_stats = value.fields.get("recommended_stats")
+            .ok_or_else(|| format!("Missing field 'recommended_stats'"))?
+            .try_into()?;
         let duration_mins = value.extract_integer("duration_mins")?;
 
         Ok(JobPrototype {
@@ -152,6 +177,8 @@ mod tests {
                 tactical: 8.0,
             },
             completion_time: chrono::Utc::now(),
+            user_id: Uuid::new_v4(),
+            character_ids: vec![Uuid::new_v4(), Uuid::new_v4()],
         };
 
         let mut doc: Document = job.clone().into();

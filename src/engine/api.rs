@@ -1,13 +1,13 @@
 use crate::{
-    engine::{self, constants, ErrorCode, job_board::JobBoard},
-    models::{Card, Character, CharacterEx, User, JobPrototype},
+    engine::{self, constants, ErrorCode, job_board::JobBoard, job_board::JobTier},
+    models::{Card, Character, CharacterEx, Job, JobPrototype, User},
     storage::firestore::FirestoreClient,
 };
 use chrono::Utc;
+use futures::future;
 use rand::Rng;
-use std::convert::TryInto;
+use std::{sync::Arc, convert::TryInto};
 use uuid::Uuid;
-use engine::job_board::JobTier;
 
 pub struct Api {
     cards: FirestoreClient,
@@ -262,6 +262,64 @@ impl Api {
         }
     }
 
+    pub async fn take_job(
+        &self,
+        user_id: Uuid,
+        job_prototype_id: &Uuid,
+        character_ids: Vec<Uuid>,
+    ) -> engine::Result<Job> {
+        // Check valid user id
+        if let None = self.users.get::<User>(&user_id).await? {
+            return Err(engine::Error::new(ErrorCode::UserNotFound, None));
+        }
+
+        // Check valid character ids
+        let char_fs = Arc::new(FirestoreClient::new_for_subcollection(
+            &self.users,
+            user_id.to_string(),
+            "characters".to_owned(),
+        ));
+
+        let tasks: Vec<_> = character_ids.clone() // TODO figure out why borrowing here requires a static lifetime
+            .into_iter()
+            .map(|c| {
+                let char_fs = Arc::clone(&char_fs);
+                tokio::spawn(async move {
+                    match char_fs.get::<Character>(&c).await {
+                        Ok(o) => {
+                            o.is_some()
+                        },
+                        Err(e) => {
+                            error!("Error validating character id: {:?}", e);
+                            false
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        let all_valid = future::join_all(tasks).await
+            .into_iter()
+            .all(|r| r.unwrap());
+
+        if !all_valid {
+            return Err(engine::Error::new(ErrorCode::CardNotFound, None));
+        }
+
+        let job = self.job_board.create_job(job_prototype_id, user_id, character_ids).await?;
+
+        let job_fs = FirestoreClient::new_for_subcollection(
+            &self.users,
+            user_id.to_string(),
+            "jobs".to_owned(),
+        );
+
+        match job_fs.insert(&job.id, job.clone()).await {
+            Ok(_) => Ok(job),
+            Err(e) => Err(engine::Error::from(e)),
+        }
+    }
+
     pub async fn scrap_staged_card(
         &self,
         user_id: &Uuid,
@@ -299,7 +357,6 @@ pub enum AddOrUpdateOperation {
 mod tests {
     use super::*;
     use crate::storage::firestore::Firestore;
-    use futures::future;
     use std::sync::Arc;
 
     static JSON_KEY_PATH: &str = "secrets/service_account.json";
