@@ -2,7 +2,7 @@ use super::schemas;
 use crate::engine;
 
 use engine::api::AddOrUpdateOperation;
-use engine::{ErrorCategory, ErrorCode, job_board::JobTier};
+use engine::{job_board::JobTier, ErrorCategory, ErrorCode};
 use std::sync::Arc;
 use uuid::Uuid;
 use warp::http::StatusCode;
@@ -226,7 +226,7 @@ pub async fn list_available_jobs(
             Err(e) => Err(reject::custom(EngineError {
                 error: e,
                 status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            }))
+            })),
         }
     } else {
         Err(reject::not_found())
@@ -263,15 +263,15 @@ pub async fn list_cards_from_compendium(api: Arc<engine::Api>) -> Result<impl Re
     }
 }
 
-pub async fn list_jobs_for_user(user_id: Uuid, api: Arc<engine::Api>) -> Result<impl Reply, Rejection> {
+pub async fn list_jobs_for_user(
+    user_id: Uuid,
+    api: Arc<engine::Api>,
+) -> Result<impl Reply, Rejection> {
     info!("Handling: list_jobs_for_user");
 
     match api.list_jobs_for_user(&user_id).await {
-        Ok(jobs) => Ok(reply::with_status(
-            reply::json(&jobs),
-            StatusCode::OK,
-        )),
-        Err(e) => Err(reject::custom(EngineError::new(e)))
+        Ok(jobs) => Ok(reply::with_status(reply::json(&jobs), StatusCode::OK)),
+        Err(e) => Err(reject::custom(EngineError::new(e))),
     }
 }
 
@@ -324,14 +324,20 @@ pub async fn take_job(
 ) -> Result<impl Reply, Rejection> {
     info!("Handling: take_job");
 
-    match api.take_job(user_id, &body.job_prototype_id, body.character_ids).await {
-        Ok(job) => {
-            Ok(reply::with_status(reply::json(&job), StatusCode::OK))
-        },
-        Err(e) => Err(reject::custom(EngineError {
-            error: e,
-            status_code: StatusCode::INTERNAL_SERVER_ERROR,
-        }))
+    // Validate at least 1 character id provided
+    if body.character_ids.len() == 0 {
+        return Err(reject::custom(MessageError {
+            error_message: "character_ids cannot be empty".to_owned(),
+            status_code: StatusCode::BAD_REQUEST,
+        }));
+    }
+
+    match api
+        .take_job(user_id, &body.job_prototype_id, body.character_ids)
+        .await
+    {
+        Ok(job) => Ok(reply::with_status(reply::json(&job), StatusCode::OK)),
+        Err(e) => Err(reject::custom(EngineError::new(e))),
     }
 }
 

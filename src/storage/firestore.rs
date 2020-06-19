@@ -458,7 +458,10 @@ impl Document {
         }
     }
 
-    pub fn extract_double<T: From<f64> + From<i32> + Float>(&self, field_name: &str) -> Result<T, String> {
+    pub fn extract_double<T: From<f64> + From<i32> + Float>(
+        &self,
+        field_name: &str,
+    ) -> Result<T, String> {
         if let Some(doc_field) = self.fields.get(field_name) {
             doc_field.extract_double()
         } else {

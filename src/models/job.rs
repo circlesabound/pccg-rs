@@ -45,22 +45,28 @@ impl TryFrom<Document> for Job {
         let id = value.extract_id()?;
         let name = value.extract_string("name")?;
         let description = value.extract_string("description")?;
-        let recommended_stats = value.fields.get("recommended_stats")
+        let recommended_stats = value
+            .fields
+            .get("recommended_stats")
             .ok_or_else(|| format!("Missing field 'recommended_stats'"))?
             .try_into()?;
         let completion_time = value.extract_timestamp("completion_time")?;
 
         let user_id_str = value.extract_string("user_id")?;
         let user_id = Uuid::parse_str(&user_id_str).unwrap();
-        let character_ids = match value.fields.get("character_ids")
-            .ok_or_else(|| format!("Missing field 'character_ids"))? {
-            DocumentField::ArrayValue(dav) => {
-                dav.values.as_ref().unwrap()
-                    .into_iter()
-                    .map(|df| Uuid::parse_str(&df.extract_string().unwrap()).unwrap())
-                    .collect()
-            },
-            df => return Err(format!("Error parsing ArrayValue from {:?}", df))
+        let character_ids = match value
+            .fields
+            .get("character_ids")
+            .ok_or_else(|| format!("Missing field 'character_ids"))?
+        {
+            DocumentField::ArrayValue(dav) => dav
+                .values
+                .as_ref()
+                .unwrap()
+                .into_iter()
+                .map(|df| Uuid::parse_str(&df.extract_string().unwrap()).unwrap())
+                .collect(),
+            df => return Err(format!("Error parsing ArrayValue from {:?}", df)),
         };
 
         Ok(Job {
@@ -91,11 +97,19 @@ impl Into<Document> for Job {
             "completion_time".to_owned(),
             DocumentField::TimestampValue(self.completion_time),
         );
-        fields.insert("user_id".to_owned(), DocumentField::StringValue(self.user_id.to_string()));
+        fields.insert(
+            "user_id".to_owned(),
+            DocumentField::StringValue(self.user_id.to_string()),
+        );
         fields.insert(
             "character_ids".to_owned(),
             DocumentField::ArrayValue(DocumentArrayValue {
-                values: Some(self.character_ids.into_iter().map(|id| DocumentField::StringValue(id.to_string())).collect())
+                values: Some(
+                    self.character_ids
+                        .into_iter()
+                        .map(|id| DocumentField::StringValue(id.to_string()))
+                        .collect(),
+                ),
             }),
         );
         Document::new(fields)
@@ -126,7 +140,9 @@ impl TryFrom<Document> for JobPrototype {
         let id = value.extract_id()?;
         let name = value.extract_string("name")?;
         let description = value.extract_string("description")?;
-        let recommended_stats = value.fields.get("recommended_stats")
+        let recommended_stats = value
+            .fields
+            .get("recommended_stats")
             .ok_or_else(|| format!("Missing field 'recommended_stats'"))?
             .try_into()?;
         let duration_mins = value.extract_integer("duration_mins")?;

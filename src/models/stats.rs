@@ -40,7 +40,10 @@ impl TryFrom<&DocumentField> for StatsI {
                     return Err(format!("Missing field 'tactical' in map"));
                 }
             } else {
-                return Err("Missing hashmap fields converting DocumentMapValue to StatsI, using defaults".to_owned());
+                return Err(
+                    "Missing hashmap fields converting DocumentMapValue to StatsI, using defaults"
+                        .to_owned(),
+                );
             }
 
             Ok(StatsI {
@@ -102,7 +105,10 @@ impl TryFrom<&DocumentField> for StatsF {
                     return Err(format!("Missing field 'tactical' in map"));
                 }
             } else {
-                return Err("Missing hashmap fields converting DocumentMapValue to StatsF, using defaults".to_owned());
+                return Err(
+                    "Missing hashmap fields converting DocumentMapValue to StatsF, using defaults"
+                        .to_owned(),
+                );
             }
 
             Ok(StatsF {

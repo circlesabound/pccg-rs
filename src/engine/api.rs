@@ -1,12 +1,12 @@
 use crate::{
-    engine::{self, constants, ErrorCode, job_board::JobBoard, job_board::JobTier},
+    engine::{self, constants, job_board::JobBoard, job_board::JobTier, ErrorCode},
     models::{Card, Character, CharacterEx, Job, JobPrototype, User},
     storage::firestore::FirestoreClient,
 };
 use chrono::Utc;
 use futures::future;
 use rand::Rng;
-use std::{sync::Arc, convert::TryInto};
+use std::{convert::TryInto, sync::Arc};
 use uuid::Uuid;
 
 pub struct Api {
@@ -17,7 +17,11 @@ pub struct Api {
 
 impl Api {
     pub async fn new(cards: FirestoreClient, job_board: JobBoard, users: FirestoreClient) -> Api {
-        Api { cards, job_board, users }
+        Api {
+            cards,
+            job_board,
+            users,
+        }
     }
 
     pub async fn add_new_user(&self, user_id: &Uuid) -> engine::Result<()> {
@@ -166,11 +170,26 @@ impl Api {
         }
     }
 
-    pub async fn list_available_jobs(
-        &self,
-        tier: &JobTier
-    ) -> engine::Result<Vec<JobPrototype>> {
+    pub async fn list_available_jobs(&self, tier: &JobTier) -> engine::Result<Vec<JobPrototype>> {
         Ok(self.job_board.list_available_jobs(tier).await)
+    }
+
+    pub async fn get_current_job_for_character(
+        &self,
+        user_id: &Uuid,
+        character_id: &Uuid,
+    ) -> engine::Result<Option<Job>> {
+        let fs = Arc::new(FirestoreClient::new_for_subcollection(
+            &self.users,
+            user_id.to_string(),
+            "jobs".to_owned(),
+        ));
+
+        // TODO replace with query
+        let jobs = fs.list::<Job>().await?;
+        Ok(jobs
+            .into_iter()
+            .find(|j| j.character_ids.contains(character_id)))
     }
 
     pub async fn get_random_card(&self) -> engine::Result<Card> {
@@ -288,6 +307,8 @@ impl Api {
             return Err(engine::Error::new(ErrorCode::UserNotFound, None));
         }
 
+        let sw = std::time::Instant::now();
+
         // Check valid character ids
         let char_fs = Arc::new(FirestoreClient::new_for_subcollection(
             &self.users,
@@ -295,15 +316,15 @@ impl Api {
             "characters".to_owned(),
         ));
 
-        let tasks: Vec<_> = character_ids.clone() // TODO figure out why borrowing here requires a static lifetime
+        let check_characters_exist_tasks: Vec<_> = character_ids
+            .clone() // TODO figure out why borrowing here requires a static lifetime
             .into_iter()
             .map(|c| {
                 let char_fs = Arc::clone(&char_fs);
                 tokio::spawn(async move {
+                    // TODO replace with custom query
                     match char_fs.get::<Character>(&c).await {
-                        Ok(o) => {
-                            o.is_some()
-                        },
+                        Ok(o) => o.is_some(),
                         Err(e) => {
                             error!("Error validating character id: {:?}", e);
                             false
@@ -313,21 +334,59 @@ impl Api {
             })
             .collect();
 
-        let all_valid = future::join_all(tasks).await
+        let all_characters_exist = future::join_all(check_characters_exist_tasks)
+            .await
             .into_iter()
-            .all(|r| r.unwrap());
+            .all(|r| match r {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Error joining future: {:?}", e);
+                    false
+                }
+            });
 
-        if !all_valid {
-            return Err(engine::Error::new(ErrorCode::CardNotFound, None));
+        if !all_characters_exist {
+            return Err(engine::Error::new(ErrorCode::CharacterNotFound, None));
         }
 
-        let job = self.job_board.create_job(job_prototype_id, user_id, character_ids).await?;
+        // Check characters are not preoccupied with other jobs
+        let ids_clone = character_ids.clone();
+        let check_characters_not_preoccupied_tasks: Vec<_> = ids_clone
+            .iter()
+            .map(|c| self.get_current_job_for_character(&user_id, c))
+            .collect();
 
-        let job_fs = FirestoreClient::new_for_subcollection(
+        let all_characters_not_preoccupied =
+            future::join_all(check_characters_not_preoccupied_tasks)
+                .await
+                .into_iter()
+                .all(|r| match r {
+                    Ok(r) => r.is_none(),
+                    Err(e) => {
+                        error!("Error joining future: {:?}", e);
+                        false
+                    }
+                });
+
+        if !all_characters_not_preoccupied {
+            return Err(engine::Error::new(ErrorCode::CharacterPreoccupied, None));
+        }
+
+        debug!(
+            "Completed precondition checks for take_job, took {:?}",
+            sw.elapsed()
+        );
+
+        let job = self
+            .job_board
+            .create_job(job_prototype_id, user_id, character_ids)
+            .await?;
+
+        let job_fs = Arc::new(FirestoreClient::new_for_subcollection(
             &self.users,
             user_id.to_string(),
             "jobs".to_owned(),
-        );
+        ));
 
         match job_fs.insert(&job.id, job.clone()).await {
             Ok(_) => Ok(job),
@@ -381,21 +440,14 @@ mod tests {
     async fn claim_daily_increases_currency_only_once() {
         tokio::spawn(async {
             let fs = Arc::new(Firestore::new(JSON_KEY_PATH).await.unwrap());
-            let cards = FirestoreClient::new(
-                Arc::clone(&fs),
-                None,
-                "_test_cards".to_owned()
-            );
-            let users = FirestoreClient::new(
-                Arc::clone(&fs),
-                None,
-                "_test_users".to_owned()
-            );
+            let cards = FirestoreClient::new(Arc::clone(&fs), None, "_test_cards".to_owned());
+            let users = FirestoreClient::new(Arc::clone(&fs), None, "_test_users".to_owned());
             let job_board = JobBoard::new(FirestoreClient::new(
                 Arc::clone(&fs),
                 None,
                 "_test_jobs".to_owned(),
-            )).await;
+            ))
+            .await;
             let api = Arc::new(Api::new(cards, job_board, users).await);
 
             // Add a new user
