@@ -205,6 +205,21 @@ impl Api {
         }
     }
 
+    pub async fn list_jobs_for_user(&self, user_id: &Uuid) -> engine::Result<Vec<Job>> {
+        match self.get_user_by_id(user_id).await? {
+            Some(_) => {
+                let fs = FirestoreClient::new_for_subcollection(
+                    &self.users,
+                    user_id.to_string(),
+                    "jobs".to_owned(),
+                );
+
+                Ok(fs.list::<Job>().await?)
+            }
+            None => Err(engine::Error::new(ErrorCode::UserNotFound, None)),
+        }
+    }
+
     pub async fn get_user_ids(&self) -> engine::Result<Vec<Uuid>> {
         // TODO find a way to do this without a full db enumeration
         Ok(self

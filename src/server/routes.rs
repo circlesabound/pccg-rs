@@ -98,6 +98,11 @@ pub fn build_routes(
         .and(with_json_from_body())
         .and_then(engine_handlers::take_job);
 
+    let list_jobs_for_user = warp::path!("users" / Uuid / "jobs")
+        .and(warp::get())
+        .and(with_engine_api(Arc::clone(&api)))
+        .and_then(engine_handlers::list_jobs_for_user);
+
     ping.or(version)
         .or(list_users_from_registry)
         .or(get_user_from_registry)
@@ -114,6 +119,7 @@ pub fn build_routes(
         .or(confirm_staged_card)
         .or(list_available_jobs)
         .or(take_job)
+        .or(list_jobs_for_user)
         .recover(engine_handlers::handle_engine_error)
         .recover(handle_not_found)
         .recover(handle_method_not_allowed)

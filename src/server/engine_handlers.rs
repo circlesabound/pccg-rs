@@ -263,6 +263,18 @@ pub async fn list_cards_from_compendium(api: Arc<engine::Api>) -> Result<impl Re
     }
 }
 
+pub async fn list_jobs_for_user(user_id: Uuid, api: Arc<engine::Api>) -> Result<impl Reply, Rejection> {
+    info!("Handling: list_jobs_for_user");
+
+    match api.list_jobs_for_user(&user_id).await {
+        Ok(jobs) => Ok(reply::with_status(
+            reply::json(&jobs),
+            StatusCode::OK,
+        )),
+        Err(e) => Err(reject::custom(EngineError::new(e)))
+    }
+}
+
 pub async fn list_users_from_registry(api: Arc<engine::Api>) -> Result<impl Reply, Rejection> {
     info!("Handling: list_users_from_registry");
 
