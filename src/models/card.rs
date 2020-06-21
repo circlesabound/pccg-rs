@@ -76,7 +76,6 @@ mod tests {
 
     #[test]
     fn can_convert_between_document_and_card() {
-        pretty_env_logger::init();
         let card = Card {
             id: Uuid::new_v4(),
             name: "test card".to_owned(),

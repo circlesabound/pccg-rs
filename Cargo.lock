@@ -937,6 +937,7 @@ dependencies = [
 name = "pccg-rs"
 version = "0.1.0"
 dependencies = [
+ "base64 0.12.0",
  "chrono",
  "dashmap",
  "futures",
@@ -946,6 +947,7 @@ dependencies = [
  "jsonwebtoken",
  "log 0.4.8",
  "num",
+ "percent-encoding",
  "pretty_env_logger",
  "rand 0.7.3",
  "serde",

@@ -22,6 +22,7 @@ use std::{
 use tokio::{
     fs,
     sync::oneshot::{self, error::TryRecvError},
+    sync::Mutex,
     sync::RwLock,
     task,
 };
@@ -74,24 +75,72 @@ impl FirestoreClient {
         }
     }
 
-    pub async fn delete<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<()> {
-        let name = format!(
-            "{}/{}/{}",
-            self.parent_path,
-            self.collection_id,
-            id.to_string()
+    pub async fn begin_transaction(
+        &self,
+        transaction_type: TransactionType,
+    ) -> storage::Result<Transaction> {
+        let database = format!(
+            "projects/{}/databases/(default)/documents",
+            self.firestore.firebase_project_id,
         );
-        self.firestore.delete::<T>(&name).await
+        let transaction_opts = match transaction_type {
+            TransactionType::ReadOnly => TransactionOptions::ReadOnly(ReadOnlyTransactionOptions {
+                read_time: Utc::now(),
+            }),
+            TransactionType::ReadWrite => {
+                TransactionOptions::ReadWrite(ReadWriteTransactionOptions {
+                    retry_transaction: None, // TODO figure out what this actually does
+                })
+            }
+        };
+        self.firestore
+            .begin_transaction(&database, transaction_opts)
+            .await
     }
 
-    pub async fn get<T: TryFrom<Document>>(&self, id: &Uuid) -> storage::Result<Option<T>> {
+    pub async fn commit_transaction(&self, transaction: Transaction) -> storage::Result<()> {
+        let database = format!(
+            "projects/{}/databases/(default)/documents",
+            self.firestore.firebase_project_id,
+        );
+        self.firestore.commit(&database, transaction).await
+    }
+
+    pub async fn delete<T: TryFrom<Document>>(
+        &self,
+        id: &Uuid,
+        transaction: Option<&Transaction>,
+    ) -> storage::Result<()> {
         let name = format!(
             "{}/{}/{}",
             self.parent_path,
             self.collection_id,
             id.to_string()
         );
-        self.firestore.get::<T>(&name).await
+        match transaction {
+            Some(t) => {
+                let write = Write::Delete { delete: name };
+                match t.append_write(write).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(e.into()),
+                }
+            }
+            None => self.firestore.delete::<T>(&name).await,
+        }
+    }
+
+    pub async fn get<T: TryFrom<Document>>(
+        &self,
+        id: &Uuid,
+        transaction: Option<&Transaction>,
+    ) -> storage::Result<Option<T>> {
+        let name = format!(
+            "{}/{}/{}",
+            self.parent_path,
+            self.collection_id,
+            id.to_string()
+        );
+        self.firestore.get::<T>(&name, transaction).await
     }
 
     pub async fn insert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
@@ -111,14 +160,34 @@ impl FirestoreClient {
             .await
     }
 
-    pub async fn upsert<T: Into<Document>>(&self, id: &Uuid, value: T) -> storage::Result<()> {
+    pub async fn upsert<T: Into<Document>>(
+        &self,
+        id: &Uuid,
+        value: T,
+        transaction: Option<&Transaction>,
+    ) -> storage::Result<()> {
         let name = format!(
             "{}/{}/{}",
             self.parent_path,
             self.collection_id,
             id.to_string()
         );
-        self.firestore.patch(&name, value).await
+        match transaction {
+            Some(t) => {
+                let mut doc = value.into();
+                doc.name = name;
+                let write = Write::Update {
+                    update: doc,
+                };
+                match t.append_write(write).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(e.into()),
+                }
+            }
+            None => {
+                self.firestore.patch(&name, value).await
+            }
+        }
     }
 }
 
@@ -194,6 +263,94 @@ impl Firestore {
         })
     }
 
+    async fn begin_transaction(
+        &self,
+        database: &str,
+        transaction_opts: TransactionOptions,
+    ) -> storage::Result<Transaction> {
+        let uri = format!(
+            "https://firestore.googleapis.com/v1/{}:beginTransaction",
+            database
+        );
+        let body = BeginTransactionRequest {
+            options: transaction_opts,
+        };
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(&uri)
+            .header(HeaderName::from_static("accept"), "application/json")
+            .header(
+                HeaderName::from_static("authorization"),
+                format!("Bearer {}", *self._oauth_token.read().await),
+            )
+            .body(Body::from(serde_json::to_string(&body)?))
+            .unwrap();
+        debug!("POST {} {:?}", uri, req);
+        let resp = self.client.request(req).await?;
+        let status = resp.status();
+        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
+        debug!(
+            "HTTP {} {}",
+            status,
+            String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
+        );
+        match status {
+            StatusCode::OK => {
+                let resp: BeginTransactionResponse = serde_json::from_slice(&body_bytes)?;
+                Ok(Transaction::new(resp.transaction))
+            }
+            _ => {
+                error!("Non-success status code {} in begin_transaction", status);
+                todo!()
+            }
+        }
+    }
+
+    async fn commit(&self, database: &str, transaction: Transaction) -> storage::Result<()> {
+        let uri = format!("https://firestore.googleapis.com/v1/{}:commit", database);
+        let transaction_id = transaction.transaction_id.clone();
+        let writes = transaction.try_into_writes().await.unwrap();
+        let body = CommitRequest {
+            writes,
+            transaction: transaction_id,
+        };
+        debug!("{}", serde_json::to_string_pretty(&body)?);
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(&uri)
+            .header(HeaderName::from_static("accept"), "application/json")
+            .header(
+                HeaderName::from_static("authorization"),
+                format!("Bearer {}", *self._oauth_token.read().await),
+            )
+            .body(Body::from(serde_json::to_string(&body)?))
+            .unwrap();
+        debug!("POST {} {:?}", uri, req);
+        let resp = self.client.request(req).await?;
+        let status = resp.status();
+        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
+        debug!(
+            "HTTP {} {}",
+            status,
+            String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
+        );
+        match status {
+            StatusCode::OK => {
+                // TODO interpret write results
+                Ok(())
+            }
+            StatusCode::CONFLICT => {
+                // Write contention
+                // TODO retry
+                Err(storage::Error::Conflict("Document contention, try again later".to_owned()))
+            }
+            _ => {
+                error!("Non-success status code {} in commit", status);
+                todo!()
+            }
+        }
+    }
+
     async fn delete<T: TryFrom<Document>>(&self, name: &str) -> storage::Result<()> {
         let uri = format!("https://firestore.googleapis.com/v1/{}", name);
         let req = Request::builder()
@@ -224,8 +381,23 @@ impl Firestore {
         }
     }
 
-    async fn get<T: TryFrom<Document>>(&self, name: &str) -> storage::Result<Option<T>> {
-        let uri = format!("https://firestore.googleapis.com/v1/{}", name);
+    async fn get<T: TryFrom<Document>>(
+        &self,
+        name: &str,
+        transaction: Option<&Transaction>,
+    ) -> storage::Result<Option<T>> {
+        let uri = match transaction {
+            Some(t) => format!(
+                "https://firestore.googleapis.com/v1/{}?transaction={}",
+                name,
+                percent_encoding::utf8_percent_encode(
+                    &t.transaction_id,
+                    percent_encoding::NON_ALPHANUMERIC
+                )
+                .to_string()
+            ),
+            None => format!("https://firestore.googleapis.com/v1/{}", name),
+        };
         let req = Request::builder()
             .method(Method::GET)
             .uri(&uri)
@@ -255,7 +427,10 @@ impl Firestore {
                 }
             }
             StatusCode::NOT_FOUND => Ok(None),
-            _ => todo!(),
+            _ => {
+                error!("Non-success status code {} in get", status);
+                todo!()
+            }
         }
     }
 
@@ -427,7 +602,7 @@ impl Firestore {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
-    #[serde(skip_serializing)]
+    // #[serde(skip_serializing)]
     pub name: String,
     pub fields: HashMap<String, DocumentField>,
     #[serde(skip_serializing)]
@@ -578,6 +753,32 @@ struct ListDocumentsResponse {
     next_page_token: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BeginTransactionRequest {
+    options: TransactionOptions,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BeginTransactionResponse {
+    transaction: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CommitRequest {
+    writes: Vec<Write>,
+    transaction: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged, rename_all = "camelCase")]
+enum Write {
+    Update { update: Document },
+    Delete { delete: String },
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RunQueryResponse {
@@ -588,6 +789,8 @@ struct RunQueryResponse {
 }
 
 // TODO
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct StructuredQuery {
     select: String,
     from: Vec<String>,
@@ -597,6 +800,74 @@ struct StructuredQuery {
     end_at: String,
     offset: u32,
     limit: u32,
+}
+
+#[derive(Debug)]
+pub struct Transaction {
+    transaction_id: String,
+    writes: Arc<Mutex<Option<Vec<Write>>>>,
+}
+
+impl Transaction {
+    fn new(id: String) -> Transaction {
+        Transaction {
+            transaction_id: id,
+            writes: Arc::new(Mutex::new(Some(vec![]))),
+        }
+    }
+
+    async fn append_write(&self, write: Write) -> Result<(), TransactionError> {
+        let mut mutex_guard = self.writes.lock().await;
+        match mutex_guard.as_mut() {
+            Some(v) => {
+                v.push(write);
+                Ok(())
+            }
+            None => Err(TransactionError::InvalidState),
+        }
+    }
+
+    async fn try_into_writes(self) -> Result<Vec<Write>, TransactionError> {
+        let mut mutex_guard = self.writes.lock().await;
+        let ret = mutex_guard.take();
+        ret.ok_or(TransactionError::InvalidState)
+    }
+}
+
+#[derive(Debug)]
+pub enum TransactionType {
+    ReadOnly,
+    ReadWrite,
+}
+
+#[derive(Debug)]
+enum TransactionError {
+    InvalidState,
+}
+
+impl Into<storage::Error> for TransactionError {
+    fn into(self) -> storage::Error {
+        storage::Error::Other(format!("{:?}", self))
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum TransactionOptions {
+    ReadOnly(ReadOnlyTransactionOptions),
+    ReadWrite(ReadWriteTransactionOptions),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadOnlyTransactionOptions {
+    read_time: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadWriteTransactionOptions {
+    retry_transaction: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -851,8 +1122,11 @@ mod tests {
                 number: 0,
                 test_case: "upsert_then_get".to_owned(),
             };
-            firestore.upsert(&id, test_item.clone()).await.unwrap();
-            let ret = firestore.get::<TestItem>(&id).await.unwrap().unwrap();
+            firestore
+                .upsert(&id, test_item.clone(), None)
+                .await
+                .unwrap();
+            let ret = firestore.get::<TestItem>(&id, None).await.unwrap().unwrap();
             assert_eq!(ret, test_item);
         })
         .await
@@ -892,7 +1166,10 @@ mod tests {
                 number: 1,
                 test_case: "list_non_empty_collection".to_owned(),
             };
-            firestore.upsert(&id, test_item.clone()).await.unwrap();
+            firestore
+                .upsert(&id, test_item.clone(), None)
+                .await
+                .unwrap();
             let ret = firestore.list::<TestItem>().await.unwrap();
             assert_eq!(ret.len(), 1);
             assert_eq!(ret[0], test_item);
@@ -913,7 +1190,7 @@ mod tests {
                 number: 2,
                 test_case: "list_empty_subcollection".to_owned(),
             };
-            firestore.upsert(&id, test_item).await.unwrap();
+            firestore.upsert(&id, test_item, None).await.unwrap();
             let sub_fs = FirestoreClient::new_for_subcollection(
                 &firestore,
                 id.to_string(),
@@ -938,13 +1215,16 @@ mod tests {
                 number: 3,
                 test_case: "list_non_empty_subcollection".to_owned(),
             };
-            firestore.upsert(&id, test_item.clone()).await.unwrap();
+            firestore
+                .upsert(&id, test_item.clone(), None)
+                .await
+                .unwrap();
             let sub_fs = FirestoreClient::new_for_subcollection(
                 &firestore,
                 id.to_string(),
                 "test".to_owned(),
             );
-            sub_fs.upsert(&id, test_item.clone()).await.unwrap();
+            sub_fs.upsert(&id, test_item.clone(), None).await.unwrap();
             let ret = sub_fs.list::<TestItem>().await.unwrap();
             assert_eq!(ret.len(), 1);
             assert_eq!(ret[0], test_item);
