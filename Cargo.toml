@@ -4,8 +4,6 @@ version = "0.1.0"
 authors = ["circlesabound"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [[bin]]
 name = "pccg-rs"
 path = "src/main.rs"
@@ -30,3 +28,7 @@ tokio = { version = "0.2", features = ["full"] }
 toml = "0.5"
 uuid = { version = "0.8", features = ["v4", "v5", "serde"] }
 warp = "0.2"
+
+[features]
+default=[]
+test_uses_network=[]

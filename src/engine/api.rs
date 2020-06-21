@@ -490,7 +490,7 @@ mod tests {
 
     static JSON_KEY_PATH: &str = "secrets/service_account.json";
 
-    #[ignore]
+    #[cfg(feature = "test_uses_network")]
     #[tokio::test(threaded_scheduler)]
     async fn claim_daily_increases_currency_once() {
         tokio::spawn(async {

@@ -176,17 +176,13 @@ impl FirestoreClient {
             Some(t) => {
                 let mut doc = value.into();
                 doc.name = name;
-                let write = Write::Update {
-                    update: doc,
-                };
+                let write = Write::Update { update: doc };
                 match t.append_write(write).await {
                     Ok(_) => Ok(()),
                     Err(e) => Err(e.into()),
                 }
             }
-            None => {
-                self.firestore.patch(&name, value).await
-            }
+            None => self.firestore.patch(&name, value).await,
         }
     }
 }
@@ -301,7 +297,10 @@ impl Firestore {
             }
             _ => {
                 error!("Non-success status code {} in begin_transaction", status);
-                todo!()
+                Err(storage::Error::Other(format!(
+                    "Non-success status code {} in begin_transaction",
+                    status
+                )))
             }
         }
     }
@@ -342,11 +341,16 @@ impl Firestore {
             StatusCode::CONFLICT => {
                 // Write contention
                 // TODO retry
-                Err(storage::Error::Conflict("Document contention, try again later".to_owned()))
+                Err(storage::Error::Conflict(
+                    "Document contention, try again later".to_owned(),
+                ))
             }
             _ => {
                 error!("Non-success status code {} in commit", status);
-                todo!()
+                Err(storage::Error::Other(format!(
+                    "Non-success status code {} in commit",
+                    status
+                )))
             }
         }
     }
@@ -423,13 +427,18 @@ impl Firestore {
                 let result: Result<T, _> = doc.try_into();
                 match result {
                     Ok(ret) => Ok(Some(ret)),
-                    Err(_) => todo!(),
+                    Err(_) => Err(storage::Error::Other(
+                        "Failed to convert from Document to requested type.".to_owned(),
+                    )),
                 }
             }
             StatusCode::NOT_FOUND => Ok(None),
             _ => {
                 error!("Non-success status code {} in get", status);
-                todo!()
+                Err(storage::Error::Other(format!(
+                    "Non-success status code {} in get",
+                    status
+                )))
             }
         }
     }
@@ -537,14 +546,22 @@ impl Firestore {
                             let result = doc.try_into();
                             match result {
                                 Ok(t) => ret.push(t),
-                                Err(_) => todo!(),
+                                Err(_) => {
+                                    error!("Failed to convert from Document to requested type.");
+                                }
                             };
                         }
                     }
 
                     next_page_token = list_response.next_page_token;
                 }
-                _ => todo!(),
+                _ => {
+                    error!("Non-success status code {} for list", status);
+                    return Err(storage::Error::Other(format!(
+                        "Non-success status code {} for list",
+                        status
+                    )));
+                }
             }
 
             if let None = next_page_token {
@@ -1068,7 +1085,7 @@ mod tests {
         assert_eq!(test_item, test_item_from_doc);
     }
 
-    #[ignore]
+    #[cfg(feature = "test_uses_network")]
     #[tokio::test(threaded_scheduler)]
     async fn can_read_key_from_json() {
         tokio::spawn(async {
@@ -1078,7 +1095,7 @@ mod tests {
         .unwrap();
     }
 
-    #[ignore]
+    #[cfg(feature = "test_uses_network")]
     #[tokio::test(threaded_scheduler)]
     async fn can_build_jwt() {
         tokio::spawn(async {
@@ -1091,7 +1108,7 @@ mod tests {
         .unwrap();
     }
 
-    #[ignore]
+    #[cfg(feature = "test_uses_network")]
     #[tokio::test(threaded_scheduler)]
     async fn can_get_oauth_token() {
         tokio::spawn(async {
@@ -1110,7 +1127,7 @@ mod tests {
         .unwrap();
     }
 
-    #[ignore]
+    #[cfg(feature = "test_uses_network")]
     #[tokio::test(threaded_scheduler)]
     async fn upsert_then_get() {
         tokio::spawn(async {
@@ -1133,7 +1150,7 @@ mod tests {
         .unwrap();
     }
 
-    #[ignore]
+    #[cfg(feature = "test_uses_network")]
     #[tokio::test(threaded_scheduler)]
     async fn list_empty_collection() {
         tokio::spawn(async {
@@ -1150,7 +1167,7 @@ mod tests {
         .unwrap();
     }
 
-    #[ignore]
+    #[cfg(feature = "test_uses_network")]
     #[tokio::test(threaded_scheduler)]
     async fn list_non_empty_collection() {
         tokio::spawn(async {
@@ -1178,7 +1195,7 @@ mod tests {
         .unwrap();
     }
 
-    #[ignore]
+    #[cfg(feature = "test_uses_network")]
     #[tokio::test(threaded_scheduler)]
     async fn list_empty_subcollection() {
         tokio::spawn(async {
@@ -1203,7 +1220,7 @@ mod tests {
         .unwrap();
     }
 
-    #[ignore]
+    #[cfg(feature = "test_uses_network")]
     #[tokio::test(threaded_scheduler)]
     async fn list_non_empty_subcollection() {
         tokio::spawn(async {
