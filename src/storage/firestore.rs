@@ -1,5 +1,5 @@
 use crate::storage;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SubsecRound, Utc};
 use hyper::{
     body::{self, Body},
     client::{Client, HttpConnector},
@@ -85,7 +85,7 @@ impl FirestoreClient {
         );
         let transaction_opts = match transaction_type {
             TransactionType::ReadOnly => TransactionOptions::ReadOnly(ReadOnlyTransactionOptions {
-                read_time: Utc::now(),
+                read_time: Utc::now().trunc_subsecs(6),
             }),
             TransactionType::ReadWrite => {
                 TransactionOptions::ReadWrite(ReadWriteTransactionOptions {

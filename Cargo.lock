@@ -937,7 +937,6 @@ dependencies = [
 name = "pccg-rs"
 version = "0.1.0"
 dependencies = [
- "base64 0.12.0",
  "chrono",
  "dashmap",
  "futures",
