@@ -6,7 +6,7 @@ RUN apt install -y pkg-config libssl-dev
 WORKDIR /usr/src/app
 COPY ./ .
 RUN cargo build --release
-RUN cargo install --path . --verbose
+RUN cargo install --path server --verbose
 
 FROM debian:buster-slim AS final
 ARG GIT_COMMIT_HASH=unversioned
