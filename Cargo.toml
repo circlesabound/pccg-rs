@@ -31,3 +31,7 @@ warp = "0.2"
 [features]
 default=[]
 test_uses_network=[]
+
+[profile.release]
+codegen-units = 1
+lto = "fat"

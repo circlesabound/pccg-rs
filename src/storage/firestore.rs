@@ -619,7 +619,6 @@ impl Firestore {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
-    // #[serde(skip_serializing)]
     pub name: String,
     pub fields: HashMap<String, DocumentField>,
     #[serde(skip_serializing)]
