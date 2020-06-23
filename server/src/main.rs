@@ -1,10 +1,15 @@
 #[macro_use]
 extern crate log;
 
-mod engine;
-mod models;
-mod server;
-mod storage;
+mod engine_handlers;
+mod health_handlers;
+mod logging;
+mod routes;
+mod schemas;
+
+use pccg_rs_engine as engine;
+use pccg_rs_models as models;
+use pccg_rs_storage as storage;
 
 use std::fs;
 use std::path::PathBuf;
@@ -46,7 +51,7 @@ async fn main() {
     let api = Arc::new(api);
 
     info!("Starting web server");
-    let routes = server::build_routes(api);
+    let routes = routes::build_routes(api);
     let (_, server) = warp::serve(routes)
         .bind_with_graceful_shutdown(config.server.get_socket_addr(), ctrlc_handler());
     server.await;

@@ -1,5 +1,5 @@
-use super::stats::{StatsF, StatsI};
-use crate::storage::firestore::{Document, DocumentField};
+use crate::stats::{StatsF, StatsI};
+use pccg_rs_storage::firestore::{Document, DocumentField};
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
@@ -95,7 +95,6 @@ mod tests {
 
         let card_clone = card.clone();
         let mut doc: Document = card_clone.into();
-        warn!("{:?}", doc);
         doc.name = format!("parent_path/{}", card.id.to_string());
 
         let card_from_doc: Card = doc.try_into().unwrap();

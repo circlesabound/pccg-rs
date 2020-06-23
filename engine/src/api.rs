@@ -1,10 +1,9 @@
-use crate::{
-    engine::{self, constants, job_board::JobBoard, job_board::JobTier, ErrorCode},
-    models::{Card, Character, CharacterEx, Job, JobPrototype, User},
-    storage::firestore::{FirestoreClient, TransactionType},
-};
+use crate as engine;
 use chrono::Utc;
+use engine::{constants, job_board::JobBoard, job_board::JobTier, ErrorCode};
 use futures::future;
+use pccg_rs_models::{Card, Character, CharacterEx, Job, JobPrototype, User};
+use pccg_rs_storage::firestore::{FirestoreClient, TransactionType};
 use rand::Rng;
 use std::{convert::TryInto, sync::Arc};
 use uuid::Uuid;
@@ -484,7 +483,7 @@ pub enum AddOrUpdateOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::firestore::Firestore;
+    use pccg_rs_storage::firestore::Firestore;
     use std::sync::Arc;
     use std::time::Duration;
 

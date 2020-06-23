@@ -1,6 +1,6 @@
-use crate::models::stats::StatsF;
-use crate::models::Card;
-use crate::storage::firestore::{Document, DocumentField};
+use crate::stats::StatsF;
+use crate::Card;
+use pccg_rs_storage::firestore::{Document, DocumentField};
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},

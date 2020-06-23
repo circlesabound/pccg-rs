@@ -1,4 +1,4 @@
-use crate::storage;
+use crate as storage;
 use chrono::{DateTime, SubsecRound, Utc};
 use hyper::{
     body::{self, Body},

@@ -1,6 +1,6 @@
-use super::stats::StatsF;
-use crate::storage::firestore::{Document, DocumentArrayValue, DocumentField};
+use crate::stats::StatsF;
 use chrono::{DateTime, Utc};
+use pccg_rs_storage::firestore::{Document, DocumentArrayValue, DocumentField};
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},

@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate log;
+
 pub mod api;
 pub use self::api::Api;
 

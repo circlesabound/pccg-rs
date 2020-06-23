@@ -1,4 +1,4 @@
-use crate::storage;
+use pccg_rs_storage as storage;
 use serde::Serialize;
 use std::error;
 use std::fmt::{self, Display};
