@@ -12,93 +12,93 @@ use warp::{Filter, Rejection, Reply};
 pub fn build_routes(
     api: Arc<engine::Api>,
 ) -> impl Filter<Extract = impl Reply, Error = Infallible> + Clone {
-    let ping = warp::path!("ping")
+    let ping = warp::path!("api" / "v0.1" / "ping")
         .and(warp::get())
         .and_then(health_handlers::ping);
 
-    let version = warp::path!("version")
+    let version = warp::path!("api" / "v0.1" / "version")
         .and(warp::get())
         .and_then(health_handlers::version);
 
-    let list_users_from_registry = warp::path!("users")
+    let list_users_from_registry = warp::path!("api" / "v0.1" / "users")
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::list_users_from_registry);
 
-    let get_user_from_registry = warp::path!("users" / Uuid)
+    let get_user_from_registry = warp::path!("api" / "v0.1" / "users" / Uuid)
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::get_user_from_registry);
 
-    let add_user_to_registry = warp::path!("users" / "new")
+    let add_user_to_registry = warp::path!("api" / "v0.1" / "users" / "new")
         .and(warp::post())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::add_user_to_registry);
 
-    let delete_user_from_registry = warp::path!("users" / Uuid)
+    let delete_user_from_registry = warp::path!("api" / "v0.1" / "users" / Uuid)
         .and(warp::delete())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::delete_user_from_registry);
 
-    let list_characters_for_user = warp::path!("users" / Uuid / "characters")
+    let list_characters_for_user = warp::path!("api" / "v0.1" / "users" / Uuid / "characters")
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::list_characters_for_user);
 
-    let get_character_for_user = warp::path!("users" / Uuid / "characters" / Uuid)
+    let get_character_for_user = warp::path!("api" / "v0.1" / "users" / Uuid / "characters" / Uuid)
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::get_character_for_user);
 
-    let claim_daily_for_user = warp::path!("users" / Uuid / "daily")
+    let claim_daily_for_user = warp::path!("api" / "v0.1" / "users" / Uuid / "daily")
         .and(warp::post())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::claim_daily_for_user);
 
-    let list_cards_from_compendium = warp::path!("compendium")
+    let list_cards_from_compendium = warp::path!("api" / "v0.1" / "compendium")
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::list_cards_from_compendium);
 
-    let draw_card_to_stage_for_user = warp::path!("users" / Uuid / "draw")
+    let draw_card_to_stage_for_user = warp::path!("api" / "v0.1" / "users" / Uuid / "draw")
         .and(warp::post())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::draw_card_to_stage_for_user);
 
-    let get_card_from_compendium = warp::path!("compendium" / Uuid)
+    let get_card_from_compendium = warp::path!("api" / "v0.1" / "compendium" / Uuid)
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::get_card_from_compendium);
 
-    let put_card_to_compendium = warp::path!("compendium" / Uuid)
+    let put_card_to_compendium = warp::path!("api" / "v0.1" / "compendium" / Uuid)
         .and(warp::put())
         .and(with_engine_api(Arc::clone(&api)))
         .and(with_json_from_body())
         .and_then(engine_handlers::put_card_to_compendium);
 
-    let get_staged_card = warp::path!("users" / Uuid / "stage")
+    let get_staged_card = warp::path!("api" / "v0.1" / "users" / Uuid / "stage")
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::get_staged_card);
 
-    let confirm_staged_card = warp::path!("users" / Uuid / "stage")
+    let confirm_staged_card = warp::path!("api" / "v0.1" / "users" / Uuid / "stage")
         .and(warp::post())
         .and(with_engine_api(Arc::clone(&api)))
         .and(with_json_from_body())
         .and_then(engine_handlers::confirm_staged_card);
 
-    let list_available_jobs = warp::path!("jobs" / String)
+    let list_available_jobs = warp::path!("api" / "v0.1" / "jobs" / String)
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::list_available_jobs);
 
-    let take_job = warp::path!("users" / Uuid / "jobs" / "new")
+    let take_job = warp::path!("api" / "v0.1" / "users" / Uuid / "jobs" / "new")
         .and(warp::post())
         .and(with_engine_api(Arc::clone(&api)))
         .and(with_json_from_body())
         .and_then(engine_handlers::take_job);
 
-    let list_jobs_for_user = warp::path!("users" / Uuid / "jobs")
+    let list_jobs_for_user = warp::path!("api" / "v0.1" / "users" / Uuid / "jobs")
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::list_jobs_for_user);

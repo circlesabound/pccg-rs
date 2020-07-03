@@ -9,7 +9,7 @@ chrono = { version = "0.4", features = ["serde"] }
 hyper = "0.13"
 hyper-tls = "0.4"
 http = "0.2"
-jsonwebtoken = "7.1.2"
+jsonwebtoken = "7.2"
 log = "0.4"
 num = "0.3"
 percent-encoding = "2.1"

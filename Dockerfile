@@ -17,5 +17,5 @@ RUN apt install -y pkg-config openssl ca-certificates
 
 COPY --from=builder /usr/local/cargo/bin/pccg-rs /bin
 COPY config.toml /bin
-EXPOSE 8080
+EXPOSE 7224
 CMD ["pccg-rs", "/bin/config.toml"]
