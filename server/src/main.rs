@@ -23,7 +23,7 @@ async fn main() {
 
     info!("Parsing config path from argv");
     let config_path = get_config_path_from_argv().unwrap_or_else(|err_msg| {
-        eprintln!("Problem parsing arguments: {:?}", err_msg);
+        error!("Problem parsing arguments: {:?}", err_msg);
         std::process::exit(1);
     });
 
