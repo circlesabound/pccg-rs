@@ -30,6 +30,17 @@ pub struct PutCardToCompendiumRequest {
 }
 
 #[derive(Deserialize)]
+pub struct RecallJobRequest {
+    pub action: RecallJobAction,
+}
+
+#[derive(Deserialize)]
+pub enum RecallJobAction {
+    Cancel,
+    Complete,
+}
+
+#[derive(Deserialize)]
 pub struct TakeJobRequest {
     pub job_prototype_id: Uuid,
     pub character_ids: Vec<Uuid>,
@@ -43,6 +54,11 @@ pub struct TakeJobRequest {
 pub struct ClaimDailyForUserResponse {
     pub user_id: Uuid,
     pub currency: u32,
+}
+
+#[derive(Serialize)]
+pub struct CompleteJobResponse {
+    // TODO
 }
 
 #[derive(Serialize)]

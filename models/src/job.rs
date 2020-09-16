@@ -177,6 +177,23 @@ impl Into<Document> for JobPrototype {
     }
 }
 
+#[derive(serde::Serialize)]
+pub struct JobCompletionReport {
+    pub job: Job,
+    pub currency_gain: u32,
+    pub experience_gain: Vec<ExperienceGain>,
+}
+
+#[derive(serde::Serialize)]
+pub struct ExperienceGain {
+    pub character_id: Uuid,
+    pub exp_gain: u32,
+    pub level_before: u32,
+    pub exp_before: u32,
+    pub level_after: u32,
+    pub exp_after: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

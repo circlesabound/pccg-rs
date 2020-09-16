@@ -23,6 +23,7 @@ pub enum ErrorCode {
     DrawStagePopulated,
     IdMismatch,
     InsufficientFunds,
+    JobNotComplete,
     JobNotFound,
     Other,
     StorageGeneric,
@@ -49,7 +50,8 @@ impl Error {
             | ErrorCode::DailyAlreadyClaimed
             | ErrorCode::DrawStageEmpty
             | ErrorCode::DrawStagePopulated
-            | ErrorCode::InsufficientFunds => ErrorCategory::FailedPrecondition,
+            | ErrorCode::InsufficientFunds
+            | ErrorCode::JobNotComplete => ErrorCategory::FailedPrecondition,
             ErrorCode::StorageTransaction => ErrorCategory::InternalRetryable,
         }
     }

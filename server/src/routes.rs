@@ -92,16 +92,27 @@ pub fn build_routes(
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::list_available_jobs);
 
-    let take_job = warp::path!("api" / "v0.1" / "users" / Uuid / "jobs" / "new")
-        .and(warp::post())
-        .and(with_engine_api(Arc::clone(&api)))
-        .and(with_json_from_body())
-        .and_then(engine_handlers::take_job);
-
     let list_jobs_for_user = warp::path!("api" / "v0.1" / "users" / Uuid / "jobs")
         .and(warp::get())
         .and(with_engine_api(Arc::clone(&api)))
         .and_then(engine_handlers::list_jobs_for_user);
+
+    let take_job_for_user = warp::path!("api" / "v0.1" / "users" / Uuid / "jobs" / "new")
+        .and(warp::post())
+        .and(with_engine_api(Arc::clone(&api)))
+        .and(with_json_from_body())
+        .and_then(engine_handlers::take_job_for_user);
+
+    let get_job_for_user = warp::path!("api" / "v0.1" / "users" / Uuid / "jobs" / Uuid)
+        .and(warp::get())
+        .and(with_engine_api(Arc::clone(&api)))
+        .and_then(engine_handlers::get_job_for_user);
+
+    let recall_job_for_user = warp::path!("api" / "v0.1" / "users" / Uuid / "jobs" / Uuid)
+        .and(warp::post())
+        .and(with_engine_api(Arc::clone(&api)))
+        .and(with_json_from_body())
+        .and_then(engine_handlers::recall_job_for_user);
 
     ping.or(version)
         .or(list_users_from_registry)
@@ -118,8 +129,10 @@ pub fn build_routes(
         .or(get_staged_card)
         .or(confirm_staged_card)
         .or(list_available_jobs)
-        .or(take_job)
         .or(list_jobs_for_user)
+        .or(take_job_for_user)
+        .or(get_job_for_user)
+        .or(recall_job_for_user)
         .recover(engine_handlers::handle_engine_error)
         .recover(handle_not_found)
         .recover(handle_method_not_allowed)

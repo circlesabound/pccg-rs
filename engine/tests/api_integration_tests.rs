@@ -39,30 +39,30 @@ async fn claim_daily_increases_currency_once() {
     let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
     api.delete_user(&user_id).await.unwrap();
     tokio::time::delay_for(Duration::from_secs(2)).await;
-    api.add_new_user(&user_id).await.unwrap();
+    api.add_user(&user_id).await.unwrap();
 
     // Save the starting currency amount
     info!("[claim_daily_increases_currency_once] Fetching starting currency amount");
-    let user = api.get_user_by_id(&user_id).await.unwrap().unwrap();
+    let user = api.get_user(&user_id).await.unwrap().unwrap();
     let starting_currency = user.currency;
 
     tokio::time::delay_for(Duration::from_secs(2)).await;
 
     // Claim daily first time
     info!("[claim_daily_increases_currency_once] Claming daily once");
-    let ret = api.claim_daily_for_user(&user_id).await;
+    let ret = api.claim_user_daily_reward(&user_id).await;
 
     tokio::time::delay_for(Duration::from_secs(2)).await;
 
     // Claim daily second time
     info!("[claim_daily_increases_currency_once] Claming daily twice");
-    let ret2 = api.claim_daily_for_user(&user_id).await;
+    let ret2 = api.claim_user_daily_reward(&user_id).await;
 
     tokio::time::delay_for(Duration::from_secs(2)).await;
 
     // Fetch the updated currency amount
     info!("[claim_daily_increases_currency_once] Fetching updated curency amount");
-    let user = api.get_user_by_id(&user_id).await.unwrap().unwrap();
+    let user = api.get_user(&user_id).await.unwrap().unwrap();
 
     // Assert that the currency amount increased once
     info!("[claim_daily_increases_currency_once] Running assertions");

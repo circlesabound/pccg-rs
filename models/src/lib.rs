@@ -12,4 +12,4 @@ mod character;
 pub use self::character::{Character, CharacterEx};
 
 mod job;
-pub use self::job::{Job, JobPrototype};
+pub use self::job::{ExperienceGain, Job, JobCompletionReport, JobPrototype};
