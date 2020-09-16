@@ -9,7 +9,7 @@ pub type Result<T> = result::Result<T, Error>;
 #[derive(Debug, Serialize)]
 pub struct Error {
     pub code: ErrorCode,
-    source: Option<ErrorSource>,
+    pub source: Option<ErrorSource>,
 }
 
 #[derive(Debug, Serialize)]
@@ -25,7 +25,8 @@ pub enum ErrorCode {
     InsufficientFunds,
     JobNotFound,
     Other,
-    Storage,
+    StorageGeneric,
+    StorageTransaction,
     UserNotFound,
 }
 
@@ -41,7 +42,7 @@ impl Error {
             | ErrorCode::IdMismatch
             | ErrorCode::JobNotFound
             | ErrorCode::UserNotFound => ErrorCategory::BadRequest,
-            ErrorCode::CompendiumEmpty | ErrorCode::Other | ErrorCode::Storage => {
+            ErrorCode::CompendiumEmpty | ErrorCode::Other | ErrorCode::StorageGeneric => {
                 ErrorCategory::Internal
             }
             ErrorCode::CharacterPreoccupied
@@ -49,6 +50,7 @@ impl Error {
             | ErrorCode::DrawStageEmpty
             | ErrorCode::DrawStagePopulated
             | ErrorCode::InsufficientFunds => ErrorCategory::FailedPrecondition,
+            ErrorCode::StorageTransaction => ErrorCategory::InternalRetryable,
         }
     }
 }
@@ -70,7 +72,11 @@ impl error::Error for Error {
 
 impl From<storage::Error> for Error {
     fn from(e: storage::Error) -> Self {
-        Error::new(ErrorCode::Storage, Some(e.into()))
+        let code = match e {
+            storage::Error::Transaction(_) => ErrorCode::StorageTransaction,
+            _ => ErrorCode::StorageGeneric,
+        };
+        Error::new(code, Some(e.into()))
     }
 }
 
@@ -106,4 +112,5 @@ pub enum ErrorCategory {
     BadRequest,
     FailedPrecondition,
     Internal,
+    InternalRetryable,
 }

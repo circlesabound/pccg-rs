@@ -11,6 +11,9 @@ use uuid::Uuid;
 static JSON_KEY_PATH: &str = "../secrets/service_account.json";
 
 fn logging_init() {
+    if std::env::var_os("RUST_LOG").is_none() {
+        std::env::set_var("RUST_LOG", "info");
+    }
     let _ = env_logger::builder().is_test(true).try_init();
 }
 

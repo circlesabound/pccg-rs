@@ -98,6 +98,69 @@ impl FirestoreClient {
             .await
     }
 
+    pub async fn batch_get<T: TryFrom<Document>>(
+        &self,
+        ids: &Vec<Uuid>,
+        transaction: Option<&Transaction>,
+    ) -> storage::Result<HashMap<Uuid, Option<T>>> {
+        let mut names = vec![];
+        for id in ids.iter() {
+            let name = format!(
+                "{}/{}/{}",
+                self.parent_path,
+                self.collection_id,
+                id.to_string(),
+            );
+            names.push(name);
+        }
+
+        let database = format!(
+            "projects/{}/databases/(default)",
+            self.firestore.firebase_project_id,
+        );
+
+        match self
+            .firestore
+            .batch_get(&database, names, transaction)
+            .await
+        {
+            Ok(batch_get_docs) => {
+                let mut map = HashMap::new();
+                for result in batch_get_docs.into_iter() {
+                    match result {
+                        BatchGetDocument::Found { found } => {
+                            let id = found.extract_id().unwrap();
+                            let doc: Result<T, _> = found.try_into();
+                            match doc {
+                                Ok(doc) => {
+                                    map.insert(id, Some(doc));
+                                }
+                                Err(_) => {
+                                    error!("Failed to convert from Document to request typed.");
+                                    // For now, any failed conversions turn into a missing document
+                                }
+                            };
+                        }
+                        BatchGetDocument::Missing { missing: _ } => {
+                            // missing field
+                            // instead of parsing the name, we just do a completeness check later
+                        }
+                    }
+                }
+
+                // Fill in any missing documents with a None value
+                for id in ids.iter() {
+                    if !map.contains_key(id) {
+                        map.insert(*id, None);
+                    }
+                }
+
+                Ok(map)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     pub async fn commit_transaction(&self, transaction: Transaction) -> storage::Result<()> {
         let database = format!(
             "projects/{}/databases/(default)/documents",
@@ -305,6 +368,58 @@ impl Firestore {
         }
     }
 
+    async fn batch_get(
+        &self,
+        database: &str,
+        documents: Vec<String>,
+        transaction: Option<&Transaction>,
+    ) -> storage::Result<Vec<BatchGetDocument>> {
+        let uri = format!(
+            "https://firestore.googleapis.com/v1/{}/documents:batchGet",
+            database
+        );
+        let transaction_id_opt = match transaction {
+            Some(t) => Some(t.transaction_id.clone()),
+            None => None,
+        };
+        let body = BatchGetRequest {
+            documents,
+            transaction: transaction_id_opt,
+        };
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(&uri)
+            .header(HeaderName::from_static("accept"), "application/json")
+            .header(
+                HeaderName::from_static("authorization"),
+                format!("Bearer {}", *self._oauth_token.read().await),
+            )
+            .body(Body::from(serde_json::to_string(&body)?))
+            .unwrap();
+        debug!("POST {} {:?}", uri, req);
+        let resp = self.client.request(req).await?;
+        let status = resp.status();
+        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
+        debug!(
+            "HTTP {} {}",
+            status,
+            String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
+        );
+        match status {
+            StatusCode::OK => {
+                let results = serde_json::from_slice(&body_bytes)?;
+                Ok(results)
+            }
+            _ => {
+                error!("Non-success status code {} in batch_get", status);
+                Err(storage::Error::Other(format!(
+                    "Non-success status code {} in batch_get",
+                    status,
+                )))
+            }
+        }
+    }
+
     async fn commit(&self, database: &str, transaction: Transaction) -> storage::Result<()> {
         let uri = format!("https://firestore.googleapis.com/v1/{}:commit", database);
         let transaction_id = transaction.transaction_id.clone();
@@ -341,7 +456,7 @@ impl Firestore {
             StatusCode::CONFLICT => {
                 // Write contention
                 // TODO retry
-                Err(storage::Error::Conflict(
+                Err(storage::Error::Transaction(
                     "Document contention, try again later".to_owned(),
                 ))
             }
@@ -797,10 +912,24 @@ enum Write {
     Delete { delete: String },
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchGetRequest {
+    documents: Vec<String>,
+    transaction: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged, rename_all = "camelCase")]
+enum BatchGetDocument {
+    Found { found: Document },
+    Missing { missing: String },
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RunQueryResponse {
-    transation: Option<String>,
+    transaction: Option<String>,
     document: Option<Document>,
     read_time: Option<String>,
     skipped_results: Option<u32>,

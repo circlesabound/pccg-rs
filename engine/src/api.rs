@@ -1,11 +1,11 @@
 use crate as engine;
 use chrono::Utc;
-use engine::{constants, job_board::JobBoard, job_board::JobTier, ErrorCode};
+use engine::{constants, job_board::JobBoard, job_board::JobTier, ErrorCategory, ErrorCode};
 use futures::future;
 use pccg_rs_models::{Card, Character, CharacterEx, Job, JobPrototype, User};
 use pccg_rs_storage::firestore::{FirestoreClient, TransactionType};
 use rand::Rng;
-use std::{convert::TryInto, sync::Arc};
+use std::{convert::TryInto, sync::Arc, time::Duration};
 use uuid::Uuid;
 
 pub struct Api {
@@ -36,91 +36,168 @@ impl Api {
         &self,
         card: Card,
     ) -> engine::Result<AddOrUpdateOperation> {
-        // TODO figure out how to do this without 2 firestore calls
-        let t = self
-            .users
-            .begin_transaction(TransactionType::ReadWrite)
-            .await?;
-        let ret = match self.cards.get::<Card>(&card.id, Some(&t)).await? {
-            Some(_) => AddOrUpdateOperation::Update,
-            None => AddOrUpdateOperation::Add,
-        };
-        self.cards.upsert(&card.id.clone(), card, Some(&t)).await?;
-        self.cards.commit_transaction(t).await?;
-        Ok(ret)
+        let mut retries: usize = 2;
+        loop {
+            let ret: engine::Result<AddOrUpdateOperation> = async {
+                let t = self
+                    .users
+                    .begin_transaction(TransactionType::ReadWrite)
+                    .await?;
+                // TODO figure out how to do this without 2 firestore calls
+                let ret = match self.cards.get::<Card>(&card.id, Some(&t)).await? {
+                    Some(_) => AddOrUpdateOperation::Update,
+                    None => AddOrUpdateOperation::Add,
+                };
+                self.cards.upsert(&card.id, card.clone(), Some(&t)).await?;
+                self.cards.commit_transaction(t).await?;
+                Ok(ret)
+            }
+            .await;
+
+            match ret {
+                Err(ref e) if retries > 0 => {
+                    if let ErrorCategory::InternalRetryable = e.classify() {
+                        info!("Caught retryable error, {} retries remaining", retries);
+                        retries -= 1;
+                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                    } else {
+                        break ret;
+                    }
+                }
+                _ => break ret,
+            }
+        }
     }
 
     pub async fn claim_daily_for_user(&self, user_id: &Uuid) -> engine::Result<u32> {
-        let t = self
-            .users
-            .begin_transaction(TransactionType::ReadWrite)
-            .await?;
-        match self.users.get::<User>(user_id, Some(&t)).await? {
-            Some(mut user) => {
-                if user.daily_last_claimed.date() < Utc::now().date() {
-                    let new_currency_amount = user.currency + constants::DAILY_CURRENCY_REWARD;
-                    user.currency = new_currency_amount;
-                    user.daily_last_claimed = Utc::now();
+        let mut retries: usize = 2;
+        loop {
+            let ret = async {
+                let t = self
+                    .users
+                    .begin_transaction(TransactionType::ReadWrite)
+                    .await?;
+                match self.users.get::<User>(user_id, Some(&t)).await? {
+                    Some(mut user) => {
+                        if user.daily_last_claimed.date() < Utc::now().date() {
+                            let new_currency_amount =
+                                user.currency + constants::DAILY_CURRENCY_REWARD;
+                            user.currency = new_currency_amount;
+                            user.daily_last_claimed = Utc::now();
 
-                    self.users.upsert(user_id, user, Some(&t)).await?;
-                    self.users.commit_transaction(t).await?;
-                    Ok(new_currency_amount)
-                } else {
-                    Err(engine::Error::new(ErrorCode::DailyAlreadyClaimed, None))
+                            self.users.upsert(user_id, user, Some(&t)).await?;
+                            self.users.commit_transaction(t).await?;
+                            Ok(new_currency_amount)
+                        } else {
+                            Err(engine::Error::new(ErrorCode::DailyAlreadyClaimed, None))
+                        }
+                    }
+                    None => Err(engine::Error::new(ErrorCode::UserNotFound, None)),
                 }
             }
-            None => Err(engine::Error::new(ErrorCode::UserNotFound, None)),
+            .await;
+
+            match ret {
+                Err(ref e) if retries > 0 => {
+                    if let ErrorCategory::InternalRetryable = e.classify() {
+                        info!("Caught retryable error, {} retries remaining", retries);
+                        retries -= 1;
+                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                    } else {
+                        break ret;
+                    }
+                }
+                _ => break ret,
+            }
         }
     }
 
     pub async fn delete_user(&self, user_id: &Uuid) -> engine::Result<()> {
-        // Check user exists
-        let t = self
-            .users
-            .begin_transaction(TransactionType::ReadWrite)
-            .await?;
-        if let Some(_) = self.users.get::<User>(user_id, Some(&t)).await? {
-            self.users.delete::<User>(user_id, Some(&t)).await?;
-            Ok(self.users.commit_transaction(t).await?)
-        } else {
-            Err(engine::Error::new(ErrorCode::UserNotFound, None))
+        let mut retries: usize = 2;
+        loop {
+            let ret = async {
+                // Check user exists
+                let t = self
+                    .users
+                    .begin_transaction(TransactionType::ReadWrite)
+                    .await?;
+                if let Some(_) = self.users.get::<User>(user_id, Some(&t)).await? {
+                    self.users.delete::<User>(user_id, Some(&t)).await?;
+                    Ok(self.users.commit_transaction(t).await?)
+                } else {
+                    Err(engine::Error::new(ErrorCode::UserNotFound, None))
+                }
+            }
+            .await;
+
+            match ret {
+                Err(ref e) if retries > 0 => {
+                    if let ErrorCategory::InternalRetryable = e.classify() {
+                        info!("Caught retryable error, {} retries remaining", retries);
+                        retries -= 1;
+                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                    } else {
+                        break ret;
+                    }
+                }
+                _ => break ret,
+            }
         }
     }
 
     pub async fn draw_card_to_stage_for_user(&self, user_id: &Uuid) -> engine::Result<u32> {
-        let t = self
-            .users
-            .begin_transaction(TransactionType::ReadWrite)
-            .await?;
+        let mut retries: usize = 2;
+        loop {
+            let ret = async {
+                let t = self
+                    .users
+                    .begin_transaction(TransactionType::ReadWrite)
+                    .await?;
 
-        // Get user
-        let mut user = self
-            .users
-            .get::<User>(user_id, Some(&t))
-            .await?
-            .ok_or(engine::Error::new(ErrorCode::UserNotFound, None))?;
+                // Get user
+                let mut user = self
+                    .users
+                    .get::<User>(user_id, Some(&t))
+                    .await?
+                    .ok_or(engine::Error::new(ErrorCode::UserNotFound, None))?;
 
-        // Check preconditions
-        if user.currency < constants::DRAW_COST {
-            Err(engine::Error::new(ErrorCode::InsufficientFunds, None))
-        } else if let Some(_) = user.staged_card {
-            Err(engine::Error::new(ErrorCode::DrawStagePopulated, None))
-        } else {
-            // Subtract funds
-            let new_currency_amount = user.currency - constants::DRAW_COST;
-            user.currency = new_currency_amount;
+                // Check preconditions
+                if user.currency < constants::DRAW_COST {
+                    Err(engine::Error::new(ErrorCode::InsufficientFunds, None))
+                } else if let Some(_) = user.staged_card {
+                    Err(engine::Error::new(ErrorCode::DrawStagePopulated, None))
+                } else {
+                    // Subtract funds
+                    let new_currency_amount = user.currency - constants::DRAW_COST;
+                    user.currency = new_currency_amount;
 
-            // Draw random card
-            let card = self.get_random_card().await?;
+                    // Draw random card
+                    let card = self.get_random_card().await?;
 
-            // Add to stage
-            user.staged_card = Some(card.id);
+                    // Add to stage
+                    user.staged_card = Some(card.id);
 
-            // Commit to storage
-            self.users.upsert(user_id, user, Some(&t)).await?;
-            self.users.commit_transaction(t).await?;
+                    // Commit to storage
+                    self.users.upsert(user_id, user, Some(&t)).await?;
+                    self.users.commit_transaction(t).await?;
 
-            Ok(new_currency_amount)
+                    Ok(new_currency_amount)
+                }
+            }
+            .await;
+
+            match ret {
+                Err(ref e) if retries > 0 => {
+                    if let ErrorCategory::InternalRetryable = e.classify() {
+                        info!("Caught retryable error, {} retries remaining", retries);
+                        retries -= 1;
+                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                    } else {
+                        break ret;
+                    }
+                }
+                _ => break ret,
+            }
         }
     }
 
@@ -143,31 +220,57 @@ impl Api {
         &self,
         user_id: &Uuid,
     ) -> engine::Result<Vec<CharacterEx>> {
-        let t = self
-            .users
-            .begin_transaction(TransactionType::ReadOnly)
-            .await?;
-        match self.users.get::<User>(user_id, Some(&t)).await? {
-            Some(_) => {
-                let fs = FirestoreClient::new_for_subcollection(
-                    &self.users,
-                    user_id.to_string(),
-                    "characters".to_owned(),
-                );
+        let mut retries: usize = 2;
+        loop {
+            let ret = async {
+                let t = self
+                    .users
+                    .begin_transaction(TransactionType::ReadOnly)
+                    .await?;
+                match self.users.get::<User>(user_id, Some(&t)).await? {
+                    Some(_) => {
+                        let fs = FirestoreClient::new_for_subcollection(
+                            &self.users,
+                            user_id.to_string(),
+                            "characters".to_owned(),
+                        );
 
-                let characters = fs.list::<Character>().await?;
-                // TODO replace with batchget or join query
-                for ch in characters.iter() {
-                    let prototype = self.cards.get(&ch.prototype_id, Some(&t)).await?.unwrap();
-                    ch.expand(prototype).await;
+                        let characters = fs.list::<Character>().await?;
+                        let prototypes = self
+                            .cards
+                            .batch_get::<Card>(
+                                &characters.iter().map(|ch| ch.prototype_id).collect(),
+                                Some(&t),
+                            )
+                            .await?;
+
+                        for ch in characters.iter() {
+                            let prototype = prototypes[&ch.prototype_id].clone().unwrap();
+                            ch.expand(prototype).await;
+                        }
+
+                        Ok(characters
+                            .into_iter()
+                            .map(|ch| ch.try_into().unwrap())
+                            .collect())
+                    }
+                    None => Err(engine::Error::new(ErrorCode::UserNotFound, None)),
                 }
-
-                Ok(characters
-                    .into_iter()
-                    .map(|ch| ch.try_into().unwrap())
-                    .collect())
             }
-            None => Err(engine::Error::new(ErrorCode::UserNotFound, None)),
+            .await;
+
+            match ret {
+                Err(ref e) if retries > 0 => {
+                    if let ErrorCategory::InternalRetryable = e.classify() {
+                        info!("Caught retryable error, {} retries remaining", retries);
+                        retries -= 1;
+                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                    } else {
+                        break ret;
+                    }
+                }
+                _ => break ret,
+            }
         }
     }
 
@@ -182,23 +285,42 @@ impl Api {
             "characters".to_owned(),
         );
 
-        let t = fs.begin_transaction(TransactionType::ReadOnly).await?;
+        let mut retries: usize = 2;
+        loop {
+            let ret = async {
+                let t = fs.begin_transaction(TransactionType::ReadOnly).await?;
 
-        let character = fs.get::<Character>(character_id, Some(&t)).await?;
-        if let Some(character) = character {
-            match self
-                .cards
-                .get::<Card>(&character.prototype_id, Some(&t))
-                .await?
-            {
-                Some(prototype) => Ok(Some(CharacterEx::new(character, prototype).await)),
-                None => {
-                    error!("prototype with id {} not found", character.prototype_id);
-                    Err(engine::Error::new(ErrorCode::Other, None))
+                let character = fs.get::<Character>(character_id, Some(&t)).await?;
+                if let Some(character) = character {
+                    match self
+                        .cards
+                        .get::<Card>(&character.prototype_id, Some(&t))
+                        .await?
+                    {
+                        Some(prototype) => Ok(Some(CharacterEx::new(character, prototype).await)),
+                        None => {
+                            error!("prototype with id {} not found", character.prototype_id);
+                            Err(engine::Error::new(ErrorCode::Other, None))
+                        }
+                    }
+                } else {
+                    Ok(None)
                 }
             }
-        } else {
-            Ok(None)
+            .await;
+
+            match ret {
+                Err(ref e) if retries > 0 => {
+                    if let ErrorCategory::InternalRetryable = e.classify() {
+                        info!("Caught retryable error, {} retries remaining", retries);
+                        retries -= 1;
+                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                    } else {
+                        break ret;
+                    }
+                }
+                _ => break ret,
+            }
         }
     }
 
@@ -235,28 +357,49 @@ impl Api {
     }
 
     pub async fn get_staged_card(&self, user_id: &Uuid) -> engine::Result<Option<Card>> {
-        let t = self
-            .users
-            .begin_transaction(TransactionType::ReadOnly)
-            .await?;
-        if let Some(user) = self.users.get::<User>(user_id, Some(&t)).await? {
-            if let Some(staged_card_id) = user.staged_card {
-                if let Some(card) = self.cards.get::<Card>(&staged_card_id, Some(&t)).await? {
-                    Ok(Some(card))
+        let mut retries: usize = 2;
+        loop {
+            let ret = async {
+                let t = self
+                    .users
+                    .begin_transaction(TransactionType::ReadOnly)
+                    .await?;
+                if let Some(user) = self.users.get::<User>(user_id, Some(&t)).await? {
+                    if let Some(staged_card_id) = user.staged_card {
+                        if let Some(card) =
+                            self.cards.get::<Card>(&staged_card_id, Some(&t)).await?
+                        {
+                            Ok(Some(card))
+                        } else {
+                            // ID of staged card does not match a card in compendium
+                            // Maybe it was removed?
+                            error!(
+                                "Staged card with id {} for user {} not found in compendium!",
+                                staged_card_id, user_id
+                            );
+                            Err(engine::Error::new(ErrorCode::CardNotFound, None))
+                        }
+                    } else {
+                        Ok(None)
+                    }
                 } else {
-                    // ID of staged card does not match a card in compendium
-                    // Maybe it was removed?
-                    error!(
-                        "Staged card with id {} for user {} not found in compendium!",
-                        staged_card_id, user_id
-                    );
-                    Err(engine::Error::new(ErrorCode::CardNotFound, None))
+                    Err(engine::Error::new(ErrorCode::UserNotFound, None))
                 }
-            } else {
-                Ok(None)
             }
-        } else {
-            Err(engine::Error::new(ErrorCode::UserNotFound, None))
+            .await;
+
+            match ret {
+                Err(ref e) if retries > 0 => {
+                    if let ErrorCategory::InternalRetryable = e.classify() {
+                        info!("Caught retryable error, {} retries remaining", retries);
+                        retries -= 1;
+                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                    } else {
+                        break ret;
+                    }
+                }
+                _ => break ret,
+            }
         }
     }
 
@@ -295,45 +438,66 @@ impl Api {
         user_id: &Uuid,
         requested_card_id: &Uuid,
     ) -> engine::Result<Card> {
-        let t = self
-            .users
-            .begin_transaction(TransactionType::ReadWrite)
-            .await?;
-        if let Some(mut user) = self.users.get::<User>(user_id, Some(&t)).await? {
-            if let Some(staged_card_id) = user.staged_card {
-                if staged_card_id == *requested_card_id {
-                    if let Some(card) = self.cards.get::<Card>(&staged_card_id, Some(&t)).await? {
-                        let character_id = Uuid::new_v4();
-                        let character = Character::new(character_id, staged_card_id);
-                        let fs = FirestoreClient::new_for_subcollection(
-                            &self.users,
-                            user_id.to_string(),
-                            "characters".to_owned(),
-                        );
-                        fs.upsert(&character_id, character, Some(&t)).await?;
-                        user.staged_card = None;
-                        self.users.upsert(user_id, user, Some(&t)).await?;
-                        self.users.commit_transaction(t).await?;
-                        Ok(card)
+        let mut retries: usize = 2;
+        loop {
+            let ret = async {
+                let t = self
+                    .users
+                    .begin_transaction(TransactionType::ReadWrite)
+                    .await?;
+                if let Some(mut user) = self.users.get::<User>(user_id, Some(&t)).await? {
+                    if let Some(staged_card_id) = user.staged_card {
+                        if staged_card_id == *requested_card_id {
+                            if let Some(card) =
+                                self.cards.get::<Card>(&staged_card_id, Some(&t)).await?
+                            {
+                                let character_id = Uuid::new_v4();
+                                let character = Character::new(character_id, staged_card_id);
+                                let fs = FirestoreClient::new_for_subcollection(
+                                    &self.users,
+                                    user_id.to_string(),
+                                    "characters".to_owned(),
+                                );
+                                fs.upsert(&character_id, character, Some(&t)).await?;
+                                user.staged_card = None;
+                                self.users.upsert(user_id, user, Some(&t)).await?;
+                                self.users.commit_transaction(t).await?;
+                                Ok(card)
+                            } else {
+                                // ID of staged card does not match a card in compendium
+                                // Maybe it was removed?
+                                error!(
+                                    "Staged card with id {} for user {} not found in compendium!",
+                                    staged_card_id, user_id
+                                );
+                                Err(engine::Error::new(ErrorCode::CardNotFound, None))
+                            }
+                        } else {
+                            // Requested card ID does not match the currently staged card ID
+                            // Enforcing ID match mitigates the race condition caused by concurrent draws
+                            Err(engine::Error::new(ErrorCode::IdMismatch, None))
+                        }
                     } else {
-                        // ID of staged card does not match a card in compendium
-                        // Maybe it was removed?
-                        error!(
-                            "Staged card with id {} for user {} not found in compendium!",
-                            staged_card_id, user_id
-                        );
-                        Err(engine::Error::new(ErrorCode::CardNotFound, None))
+                        Err(engine::Error::new(ErrorCode::DrawStageEmpty, None))
                     }
                 } else {
-                    // Requested card ID does not match the currently staged card ID
-                    // Enforcing ID match mitigates the race condition caused by concurrent draws
-                    Err(engine::Error::new(ErrorCode::IdMismatch, None))
+                    Err(engine::Error::new(ErrorCode::UserNotFound, None))
                 }
-            } else {
-                Err(engine::Error::new(ErrorCode::DrawStageEmpty, None))
             }
-        } else {
-            Err(engine::Error::new(ErrorCode::UserNotFound, None))
+            .await;
+
+            match ret {
+                Err(ref e) if retries > 0 => {
+                    if let ErrorCategory::InternalRetryable = e.classify() {
+                        info!("Caught retryable error, {} retries remaining", retries);
+                        retries -= 1;
+                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                    } else {
+                        break ret;
+                    }
+                }
+                _ => break ret,
+            }
         }
     }
 
@@ -343,102 +507,94 @@ impl Api {
         job_prototype_id: &Uuid,
         character_ids: Vec<Uuid>,
     ) -> engine::Result<Job> {
-        let t = self
-            .users
-            .begin_transaction(TransactionType::ReadWrite)
-            .await?;
+        let mut retries: usize = 2;
+        loop {
+            let ret = async {
+                let t = self
+                    .users
+                    .begin_transaction(TransactionType::ReadWrite)
+                    .await?;
 
-        // Check valid user id
-        if let None = self.users.get::<User>(&user_id, Some(&t)).await? {
-            return Err(engine::Error::new(ErrorCode::UserNotFound, None));
-        }
-
-        let sw = std::time::Instant::now();
-
-        // Check valid character ids
-        let char_fs = Arc::new(FirestoreClient::new_for_subcollection(
-            &self.users,
-            user_id.to_string(),
-            "characters".to_owned(),
-        ));
-
-        let check_characters_exist_tasks: Vec<_> = character_ids
-            .clone() // TODO figure out why borrowing here requires a static lifetime
-            .into_iter()
-            .map(|c| {
-                let char_fs = Arc::clone(&char_fs);
-                // BUG borrow restrictions prevent using transaction here
-                tokio::spawn(async move {
-                    // TODO replace with custom query
-                    match char_fs.get::<Character>(&c, None).await {
-                        Ok(o) => o.is_some(),
-                        Err(e) => {
-                            error!("Error validating character id: {:?}", e);
-                            false
-                        }
-                    }
-                })
-            })
-            .collect();
-
-        let all_characters_exist = future::join_all(check_characters_exist_tasks)
-            .await
-            .into_iter()
-            .all(|r| match r {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("Error joining future: {:?}", e);
-                    false
+                // Check valid user id
+                if let None = self.users.get::<User>(&user_id, Some(&t)).await? {
+                    return Err(engine::Error::new(ErrorCode::UserNotFound, None));
                 }
-            });
 
-        if !all_characters_exist {
-            return Err(engine::Error::new(ErrorCode::CharacterNotFound, None));
-        }
+                let sw = std::time::Instant::now();
 
-        // Check characters are not preoccupied with other jobs
-        let ids_clone = character_ids.clone();
-        let check_characters_not_preoccupied_tasks: Vec<_> = ids_clone
-            .iter()
-            .map(|c| self.get_current_job_for_character(&user_id, c))
-            .collect();
+                // Check valid character ids
+                let char_fs = Arc::new(FirestoreClient::new_for_subcollection(
+                    &self.users,
+                    user_id.to_string(),
+                    "characters".to_owned(),
+                ));
+                let char_map = char_fs
+                    .batch_get::<Character>(&character_ids, Some(&t))
+                    .await?;
+                if !char_map.values().all(|o| o.is_some()) {
+                    return Err(engine::Error::new(ErrorCode::CharacterNotFound, None));
+                }
 
-        let all_characters_not_preoccupied =
-            future::join_all(check_characters_not_preoccupied_tasks)
-                .await
-                .into_iter()
-                .all(|r| match r {
-                    Ok(r) => r.is_none(),
-                    Err(e) => {
-                        error!("Error joining future: {:?}", e);
-                        false
+                // Check characters are not preoccupied with other jobs
+                // TODO this sucks. query would be nice (or at least a batch version)
+                let ids_clone = character_ids.clone();
+                let check_characters_not_preoccupied_tasks: Vec<_> = ids_clone
+                    .iter()
+                    .map(|c| self.get_current_job_for_character(&user_id, c))
+                    .collect();
+
+                let all_characters_not_preoccupied =
+                    future::join_all(check_characters_not_preoccupied_tasks)
+                        .await
+                        .into_iter()
+                        .all(|r| match r {
+                            Ok(r) => r.is_none(),
+                            Err(e) => {
+                                error!("Error joining future: {:?}", e);
+                                false
+                            }
+                        });
+
+                if !all_characters_not_preoccupied {
+                    return Err(engine::Error::new(ErrorCode::CharacterPreoccupied, None));
+                }
+
+                debug!(
+                    "Completed precondition checks for take_job, took {:?}",
+                    sw.elapsed()
+                );
+
+                let job = self
+                    .job_board
+                    .create_job(job_prototype_id, user_id, character_ids.clone())
+                    .await?;
+
+                let job_fs = Arc::new(FirestoreClient::new_for_subcollection(
+                    &self.users,
+                    user_id.to_string(),
+                    "jobs".to_owned(),
+                ));
+
+                job_fs.upsert(&job.id, job.clone(), Some(&t)).await?;
+                match job_fs.commit_transaction(t).await {
+                    Ok(_) => Ok(job),
+                    Err(e) => Err(engine::Error::from(e)),
+                }
+            }
+            .await;
+
+            match ret {
+                Err(ref e) if retries > 0 => {
+                    if let ErrorCategory::InternalRetryable = e.classify() {
+                        info!("Caught retryable error, {} retries remaining", retries);
+                        retries -= 1;
+                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                    } else {
+                        break ret;
                     }
-                });
-
-        if !all_characters_not_preoccupied {
-            return Err(engine::Error::new(ErrorCode::CharacterPreoccupied, None));
-        }
-
-        debug!(
-            "Completed precondition checks for take_job, took {:?}",
-            sw.elapsed()
-        );
-
-        let job = self
-            .job_board
-            .create_job(job_prototype_id, user_id, character_ids)
-            .await?;
-
-        let job_fs = Arc::new(FirestoreClient::new_for_subcollection(
-            &self.users,
-            user_id.to_string(),
-            "jobs".to_owned(),
-        ));
-
-        job_fs.upsert(&job.id, job.clone(), Some(&t)).await?;
-        match job_fs.commit_transaction(t).await {
-            Ok(_) => Ok(job),
-            Err(e) => Err(engine::Error::from(e)),
+                }
+                _ => break ret,
+            }
         }
     }
 
@@ -447,30 +603,49 @@ impl Api {
         user_id: &Uuid,
         requested_card_id: &Uuid,
     ) -> engine::Result<u32> {
-        let t = self
-            .users
-            .begin_transaction(TransactionType::ReadWrite)
-            .await?;
-        if let Some(mut user) = self.users.get::<User>(user_id, Some(&t)).await? {
-            if let Some(staged_card_id) = user.staged_card {
-                if staged_card_id == *requested_card_id {
-                    // Partial refund
-                    let new_currency_amount = user.currency + constants::SCRAP_REFUND;
-                    user.currency = new_currency_amount;
-                    user.staged_card = None;
-                    self.users.upsert(user_id, user, Some(&t)).await?;
-                    self.users.commit_transaction(t).await?;
-                    Ok(new_currency_amount)
+        let mut retries: usize = 2;
+        loop {
+            let ret = async {
+                let t = self
+                    .users
+                    .begin_transaction(TransactionType::ReadWrite)
+                    .await?;
+                if let Some(mut user) = self.users.get::<User>(user_id, Some(&t)).await? {
+                    if let Some(staged_card_id) = user.staged_card {
+                        if staged_card_id == *requested_card_id {
+                            // Partial refund
+                            let new_currency_amount = user.currency + constants::SCRAP_REFUND;
+                            user.currency = new_currency_amount;
+                            user.staged_card = None;
+                            self.users.upsert(user_id, user, Some(&t)).await?;
+                            self.users.commit_transaction(t).await?;
+                            Ok(new_currency_amount)
+                        } else {
+                            // Requested card ID does not match the currently staged card ID
+                            // Enforcing ID match mitigates the race condition caused by concurrent draws
+                            Err(engine::Error::new(ErrorCode::IdMismatch, None))
+                        }
+                    } else {
+                        Err(engine::Error::new(ErrorCode::DrawStageEmpty, None))
+                    }
                 } else {
-                    // Requested card ID does not match the currently staged card ID
-                    // Enforcing ID match mitigates the race condition caused by concurrent draws
-                    Err(engine::Error::new(ErrorCode::IdMismatch, None))
+                    Err(engine::Error::new(ErrorCode::UserNotFound, None))
                 }
-            } else {
-                Err(engine::Error::new(ErrorCode::DrawStageEmpty, None))
             }
-        } else {
-            Err(engine::Error::new(ErrorCode::UserNotFound, None))
+            .await;
+
+            match ret {
+                Err(ref e) if retries > 0 => {
+                    if let ErrorCategory::InternalRetryable = e.classify() {
+                        info!("Caught retryable error, {} retries remaining", retries);
+                        retries -= 1;
+                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                    } else {
+                        break ret;
+                    }
+                }
+                _ => break ret,
+            }
         }
     }
 }

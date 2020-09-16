@@ -14,6 +14,7 @@ pub enum Error {
     OAuth(String),
     Other(String),
     Serialization(serde_json::error::Error),
+    Transaction(String),
 }
 
 impl Display for Error {
@@ -26,6 +27,7 @@ impl Display for Error {
             Error::OAuth(ref e) => Display::fmt(e, f),
             Error::Other(ref e) => Display::fmt(e, f),
             Error::Serialization(ref e) => Display::fmt(e, f),
+            Error::Transaction(ref e) => Display::fmt(e, f),
         }
     }
 }
@@ -40,6 +42,7 @@ impl error::Error for Error {
             Error::OAuth(_) => None,
             Error::Other(_) => None,
             Error::Serialization(ref e) => Some(e),
+            Error::Transaction(_) => None,
         }
     }
 }
@@ -88,6 +91,11 @@ impl Serialize for Error {
                 variant_index = 6;
                 variant = "Serialization";
                 value = format!("{:?}", e);
+            }
+            Error::Transaction(ref e) => {
+                variant_index = 7;
+                variant = "Transaction";
+                value = e.to_string();
             }
         };
         serializer.serialize_newtype_variant(name, variant_index, variant, &value)

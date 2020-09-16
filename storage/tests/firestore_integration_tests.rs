@@ -12,6 +12,9 @@ use uuid::Uuid;
 static JSON_KEY_PATH: &str = "../secrets/service_account.json";
 
 fn logging_init() {
+    if std::env::var_os("RUST_LOG").is_none() {
+        std::env::set_var("RUST_LOG", "info");
+    }
     let _ = env_logger::builder().is_test(true).try_init();
 }
 
@@ -25,7 +28,7 @@ async fn can_upsert_then_get() {
     let test_item = TestItem {
         id,
         number: 0,
-        test_case: "upsert_then_get".to_owned(),
+        test_case: "can_upsert_then_get".to_owned(),
     };
     firestore
         .upsert(&id, test_item.clone(), None)
@@ -63,7 +66,7 @@ async fn can_list_non_empty_collection() {
     let test_item = TestItem {
         id,
         number: 1,
-        test_case: "list_non_empty_collection".to_owned(),
+        test_case: "can_list_non_empty_collection".to_owned(),
     };
     firestore
         .upsert(&id, test_item.clone(), None)
@@ -84,7 +87,7 @@ async fn can_list_empty_subcollection() {
     let test_item = TestItem {
         id,
         number: 2,
-        test_case: "list_empty_subcollection".to_owned(),
+        test_case: "can_list_empty_subcollection".to_owned(),
     };
     firestore.upsert(&id, test_item, None).await.unwrap();
     let sub_fs =
@@ -103,7 +106,7 @@ async fn can_list_non_empty_subcollection() {
     let test_item = TestItem {
         id,
         number: 3,
-        test_case: "list_non_empty_subcollection".to_owned(),
+        test_case: "can_list_non_empty_subcollection".to_owned(),
     };
     firestore
         .upsert(&id, test_item.clone(), None)
@@ -115,6 +118,52 @@ async fn can_list_non_empty_subcollection() {
     let ret = sub_fs.list::<TestItem>().await.unwrap();
     assert_eq!(ret.len(), 1);
     assert_eq!(ret[0], test_item);
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn can_upsert_then_batch_get() {
+    logging_init();
+
+    let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
+    let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
+
+    let id_1 = Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap();
+    let test_item_1 = TestItem {
+        id: id_1,
+        number: 0,
+        test_case: "can_upsert_then_batch_get".to_owned(),
+    };
+    firestore
+        .upsert(&id_1, test_item_1.clone(), None)
+        .await
+        .unwrap();
+
+    let id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap();
+    let test_item_2 = TestItem {
+        id: id_2,
+        number: 0,
+        test_case: "can_upsert_then_batch_get".to_owned(),
+    };
+    firestore
+        .upsert(&id_2, test_item_2.clone(), None)
+        .await
+        .unwrap();
+
+    let id_3 = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+
+    let ret = firestore
+        .batch_get::<TestItem>(&vec![id_1, id_2, id_3], None)
+        .await
+        .unwrap();
+    assert_eq!(ret.len(), 3);
+    assert!(ret.contains_key(&id_1));
+    assert_ne!(ret[&id_1], None);
+    assert_eq!(ret[&id_2], Some(test_item_2));
+    assert!(ret.contains_key(&id_2));
+    assert_ne!(ret[&id_2], None);
+    assert_eq!(ret[&id_1], Some(test_item_1));
+    assert!(ret.contains_key(&id_3));
+    assert_eq!(ret[&id_3], None);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
