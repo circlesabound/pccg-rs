@@ -607,11 +607,13 @@ impl Firestore {
         }
     }
 
+    #[allow(dead_code)]
     async fn run_query<T: TryFrom<Document>>(
         &self,
-        parent: &str,
-        structured_query: StructuredQuery,
+        _parent: &str,
+        _structured_query: StructuredQuery,
     ) -> storage::Result<T> {
+        // TODO Firestore::run_query
         todo!()
     }
 }
@@ -904,13 +906,19 @@ async fn read_json_key<P: Into<PathBuf>>(json_key_path: P) -> storage::Result<Js
     Ok(serde_json::from_str(&contents)?)
 }
 
+/// OpenID Connect claims data structure
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
-    iss: String,   // Email address of the service account
-    scope: String, // Space-delimited list of the permissions requested
-    aud: String, // Inteneded target of assertion, should just be https://oauth2.googleapis.com/token
-    exp: usize, // Expiration time of the assertion, as seconds since epoch. Maximum of 1 hour after issuance.
-    iat: usize, // Assertion issuance time, as seconds since epoch.
+    /// Email address of the service account
+    iss: String,
+    /// Space-delimited list of the permissions requested
+    scope: String,
+    /// Intended target of assertion, should just be https://oauth2.googleapis.com/token
+    aud: String,
+    /// Expiration time of the assertion, as seconds since epoch. Maximum of 1 hour after issuance
+    exp: usize,
+    /// Assertion issuance time, as seconds since epoch
+    iat: usize,
 }
 
 async fn build_jwt(email: &str, private_key: &str) -> storage::Result<String> {
@@ -959,83 +967,71 @@ async fn get_oauth_token(
         .uri("https://oauth2.googleapis.com/token")
         .body(Body::from(serde_json::to_string_pretty(&request_body)?))
         .unwrap();
-    debug!("Request: {:?}", request);
     let response = http_client.request(request).await?;
     let status = response.status();
     let body_bytes = body::to_bytes(response.into_body())
         .await
         .unwrap_or_default();
-    let ret;
 
     match status {
         StatusCode::OK => {
             let body: OAuth2Response = serde_json::from_slice(&body_bytes)?;
             debug!("Response: {} {:?}", status, body);
-            ret = Ok((body.access_token, body.expires_in));
             info!("Obtained OAuth token, took {:?}", sw.elapsed());
+            Ok((body.access_token, body.expires_in))
         }
         _ => {
             let body_str = String::from_utf8(body_bytes.to_vec())
                 .unwrap_or_else(|_| "<mangled body>".to_owned());
-            error!(
-                "Non-success when requesting OAuth token. Response: {} {}",
-                status, body_str
-            );
-            ret = Err(storage::Error::OAuth(format!(
+            info!("Failed to obtain OAuth token, took {:?}", sw.elapsed());
+            Err(storage::Error::OAuth(format!(
                 "OAuth flow returned HTTP {} with body content: {}",
                 status, body_str
-            )));
-            info!("Failed to obtain OAuth token, took {:?}", sw.elapsed());
+            )))
         }
     }
-
-    ret
 }
 
 #[cfg(test)]
 mod tests {
+    extern crate env_logger;
     use super::*;
 
-    #[cfg(feature = "test_uses_network")]
-    static JSON_KEY_PATH: &str = "../secrets/service_account.json";
-
-    #[test]
-    fn can_convert_between_document_and_test_item() {
-        let test_item = TestItem {
-            id: Uuid::new_v4(),
-            number: 42,
-            test_case: "can_convert_between_document_and_test_item".to_owned(),
-        };
-
-        let mut doc: Document = test_item.clone().into();
-        doc.name = format!("parent_path/{}", test_item.id.to_string());
-
-        let test_item_from_doc: TestItem = doc.try_into().unwrap();
-
-        assert_eq!(test_item, test_item_from_doc);
+    fn logging_init() {
+        let _ = env_logger::builder().is_test(true).try_init();
     }
 
-    #[cfg(feature = "test_uses_network")]
+    static FAKE_JSON_KEY_PATH: &str = "fake_service_account.json";
+
     #[tokio::test(threaded_scheduler)]
     async fn can_read_key_from_json() {
-        match read_json_key(JSON_KEY_PATH).await {
-            Ok(key) => assert!(true),
+        logging_init();
+
+        match read_json_key(FAKE_JSON_KEY_PATH).await {
+            Ok(_) => assert!(true),
             Err(e) => assert!(false, format!("{:?}", e)),
         }
     }
 
-    #[cfg(feature = "test_uses_network")]
     #[tokio::test(threaded_scheduler)]
     async fn can_build_jwt() {
-        let key = read_json_key(JSON_KEY_PATH).await.unwrap();
-        build_jwt(&key.client_email, &key.private_key)
-            .await
-            .unwrap();
+        logging_init();
+
+        let key = read_json_key(FAKE_JSON_KEY_PATH).await.unwrap();
+        match build_jwt(&key.client_email, &key.private_key).await {
+            Ok(_) => assert!(true),
+            Err(e) => assert!(false, format!("{:?}", e)),
+        }
     }
 
-    #[cfg(feature = "test_uses_network")]
+    #[cfg(feature = "test_requires_secrets")]
+    static JSON_KEY_PATH: &str = "../secrets/service_account.json";
+
+    #[cfg(feature = "test_requires_secrets")]
     #[tokio::test(threaded_scheduler)]
     async fn can_get_oauth_token() {
+        logging_init();
+
         let key = read_json_key(JSON_KEY_PATH).await.unwrap();
         let jwt = build_jwt(&key.client_email, &key.private_key)
             .await
@@ -1046,172 +1042,5 @@ mod tests {
         let client = Client::builder().build::<_, hyper::Body>(https);
 
         get_oauth_token(jwt, &client).await.unwrap();
-    }
-
-    #[cfg(feature = "test_uses_network")]
-    #[tokio::test(threaded_scheduler)]
-    async fn upsert_then_get() {
-        let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-        let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
-        let id = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
-        let test_item = TestItem {
-            id,
-            number: 0,
-            test_case: "upsert_then_get".to_owned(),
-        };
-        firestore
-            .upsert(&id, test_item.clone(), None)
-            .await
-            .unwrap();
-        let ret = firestore.get::<TestItem>(&id, None).await.unwrap().unwrap();
-        assert_eq!(ret, test_item);
-    }
-
-    #[cfg(feature = "test_uses_network")]
-    #[tokio::test(threaded_scheduler)]
-    async fn list_empty_collection() {
-        let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-        let firestore = FirestoreClient::new(
-            Arc::new(firestore),
-            None,
-            "_test_list_empty_collection".to_owned(),
-        );
-        let ret = firestore.list::<TestItem>().await.unwrap();
-        assert_eq!(ret, vec![]);
-    }
-
-    #[cfg(feature = "test_uses_network")]
-    #[tokio::test(threaded_scheduler)]
-    async fn list_non_empty_collection() {
-        let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-        let firestore = FirestoreClient::new(
-            Arc::new(firestore),
-            None,
-            "_test_list_non_empty_collection".to_owned(),
-        );
-        let id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let test_item = TestItem {
-            id,
-            number: 1,
-            test_case: "list_non_empty_collection".to_owned(),
-        };
-        firestore
-            .upsert(&id, test_item.clone(), None)
-            .await
-            .unwrap();
-        let ret = firestore.list::<TestItem>().await.unwrap();
-        assert_eq!(ret.len(), 1);
-        assert_eq!(ret[0], test_item);
-    }
-
-    #[cfg(feature = "test_uses_network")]
-    #[tokio::test(threaded_scheduler)]
-    async fn list_empty_subcollection() {
-        let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-        let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
-        let id = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
-        let test_item = TestItem {
-            id,
-            number: 2,
-            test_case: "list_empty_subcollection".to_owned(),
-        };
-        firestore.upsert(&id, test_item, None).await.unwrap();
-        let sub_fs =
-            FirestoreClient::new_for_subcollection(&firestore, id.to_string(), "test".to_owned());
-        let ret = sub_fs.list::<TestItem>().await.unwrap();
-        assert_eq!(ret, vec![]);
-    }
-
-    #[cfg(feature = "test_uses_network")]
-    #[tokio::test(threaded_scheduler)]
-    async fn list_non_empty_subcollection() {
-        let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
-        let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
-        let id = Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap();
-        let test_item = TestItem {
-            id,
-            number: 3,
-            test_case: "list_non_empty_subcollection".to_owned(),
-        };
-        firestore
-            .upsert(&id, test_item.clone(), None)
-            .await
-            .unwrap();
-        let sub_fs =
-            FirestoreClient::new_for_subcollection(&firestore, id.to_string(), "test".to_owned());
-        sub_fs.upsert(&id, test_item.clone(), None).await.unwrap();
-        let ret = sub_fs.list::<TestItem>().await.unwrap();
-        assert_eq!(ret.len(), 1);
-        assert_eq!(ret[0], test_item);
-    }
-
-    #[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
-    struct TestItem {
-        pub id: Uuid,
-        pub number: u32,
-        pub test_case: String,
-    }
-
-    impl TryFrom<Document> for TestItem {
-        type Error = String;
-
-        fn try_from(value: Document) -> Result<Self, Self::Error> {
-            let id = value.extract_id();
-            if let Err(e) = id {
-                return Err(format!(
-                    "Could not convert Document to TestItem: error parsing id: {}",
-                    e
-                ));
-            }
-            let id = id.unwrap();
-
-            let number;
-            if let Some(DocumentField::IntegerValue(number_str)) = value.fields.get("number") {
-                match number_str.parse() {
-                    Ok(n) => number = n,
-                    Err(e) => {
-                        return Err(format!("Could not convert Document to TestItem: error parsing field 'number': {}", e));
-                    }
-                }
-            } else {
-                return Err(
-                    "Could not convert Document to TestItem: missing field 'number'".to_owned(),
-                );
-            }
-
-            let test_case;
-            if let Some(DocumentField::StringValue(test_case_str)) = value.fields.get("test_case") {
-                test_case = test_case_str.to_string();
-            } else {
-                return Err(
-                    "Could not convert Document to TestItem: missing field 'test_case'".to_owned(),
-                );
-            }
-
-            Ok(TestItem {
-                id,
-                number,
-                test_case,
-            })
-        }
-    }
-
-    impl Into<Document> for TestItem {
-        fn into(self) -> Document {
-            let mut fields = HashMap::new();
-            fields.insert(
-                "id".to_owned(),
-                DocumentField::StringValue(self.id.to_string()),
-            );
-            fields.insert(
-                "number".to_owned(),
-                DocumentField::IntegerValue(self.number.to_string()),
-            );
-            fields.insert(
-                "test_case".to_owned(),
-                DocumentField::StringValue(self.test_case),
-            );
-            Document::new(fields)
-        }
     }
 }

@@ -961,6 +961,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dashmap",
+ "env_logger",
  "futures",
  "http",
  "hyper",
@@ -1016,6 +1017,7 @@ name = "pccg-rs-storage"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "env_logger",
  "http",
  "hyper",
  "hyper-tls",
