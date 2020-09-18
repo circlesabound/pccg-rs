@@ -34,7 +34,7 @@ impl Job {
     }
 
     pub fn can_complete(&self) -> bool {
-        self.completion_time > Utc::now()
+        self.completion_time < Utc::now()
     }
 }
 
