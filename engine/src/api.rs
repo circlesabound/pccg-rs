@@ -536,6 +536,11 @@ impl Api {
         user_id: &Uuid,
         job_id: &Uuid,
     ) -> engine::Result<JobCompletionReport> {
+        let char_fs = FirestoreClient::new_for_subcollection(
+            &self.users,
+            user_id.to_string(),
+            "characters".to_owned(),
+        );
         let job_fs = FirestoreClient::new_for_subcollection(
             &self.users,
             user_id.to_string(),
@@ -555,10 +560,19 @@ impl Api {
                         let report = self.generate_job_completion_report(job, &t).await?;
 
                         // Apply currency rewards
-                        // TODO
+                        let mut user = self.users.get::<User>(user_id, Some(&t)).await?.expect("User assumed to exist");
+                        user.currency += report.currency_gain;
+                        self.users.upsert(user_id, user, Some(&t)).await?;
 
                         // Apply experience changes
-                        // TODO
+                        let char_ids: Vec<Uuid> = report.experience_gain.iter().map(|eg| eg.character_id).collect();
+                        let mut chars = char_fs.batch_get::<Character>(&char_ids, Some(&t)).await?;
+                        for eg in report.experience_gain.iter() {
+                            let mut ch = chars.remove(&eg.character_id).expect("Character assumed to exist").expect("Character assumed to exist");
+                            ch.level = eg.level_after;
+                            ch.experience = eg.exp_after;
+                            char_fs.upsert(&eg.character_id, ch, Some(&t)).await?;
+                        }
 
                         // Delete job
                         job_fs.delete::<Job>(job_id, Some(&t)).await?;
@@ -723,16 +737,16 @@ impl Api {
             "characters".to_owned(),
         );
 
-        // TODO un-hardcode this
         let char_map = char_fs
             .batch_get::<Character>(&job.character_ids, Some(transaction))
             .await?;
         if !char_map.values().all(|c| c.is_some()) {
             // TODO handle this properly
-            panic!();
+            todo!();
         }
         let chars: Vec<Character> = char_map.into_iter().map(|(_, o)| o.unwrap()).collect();
 
+        // TODO un-hardcode this
         let mut exp_gains = vec![];
         for ch in chars.into_iter() {
             let exp_gain = 70;
