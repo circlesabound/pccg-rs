@@ -10,6 +10,7 @@ use std::{
 use uuid::Uuid;
 
 static JSON_KEY_PATH: &str = "../secrets/service_account.json";
+static UUID_NAMESPACE: &str = "6e81479f-5718-4d5c-aab7-6eb6de4465c2";
 
 fn logging_init() {
     if std::env::var_os("RUST_LOG").is_none() {
@@ -18,13 +19,18 @@ fn logging_init() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
 
+fn generate_uuid(string: &str) -> Uuid {
+    let namespace = Uuid::parse_str(UUID_NAMESPACE).unwrap();
+    Uuid::new_v5(&namespace, string.as_bytes())
+}
+
 #[tokio::test(threaded_scheduler)]
 async fn can_upsert_then_get() {
     logging_init();
 
     let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
     let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
-    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap();
+    let id = generate_uuid(stringify!(can_upsert_then_get));
     let test_item = TestItem {
         id,
         number: 0,
@@ -62,7 +68,7 @@ async fn can_list_non_empty_collection() {
         None,
         "_test_list_non_empty_collection".to_owned(),
     );
-    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let id = generate_uuid(stringify!(can_list_non_empty_collection));
     let test_item = TestItem {
         id,
         number: 1,
@@ -83,7 +89,7 @@ async fn can_list_empty_subcollection() {
 
     let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
     let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
-    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
+    let id = generate_uuid(stringify!(can_list_empty_subcollection));
     let test_item = TestItem {
         id,
         number: 2,
@@ -102,7 +108,7 @@ async fn can_list_non_empty_subcollection() {
 
     let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
     let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
-    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap();
+    let id = generate_uuid(stringify!(can_list_non_empty_subcollection));
     let test_item = TestItem {
         id,
         number: 3,
@@ -127,7 +133,7 @@ async fn can_upsert_then_batch_get() {
     let firestore = Firestore::new(JSON_KEY_PATH).await.unwrap();
     let firestore = FirestoreClient::new(Arc::new(firestore), None, "_test".to_owned());
 
-    let id_1 = Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap();
+    let id_1 = generate_uuid(&format!("{}_1", stringify!(can_upsert_then_batch_get)));
     let test_item_1 = TestItem {
         id: id_1,
         number: 0,
@@ -138,7 +144,7 @@ async fn can_upsert_then_batch_get() {
         .await
         .unwrap();
 
-    let id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap();
+    let id_2 = generate_uuid(&format!("{}_2", stringify!(can_upsert_then_batch_get)));
     let test_item_2 = TestItem {
         id: id_2,
         number: 0,
@@ -149,7 +155,7 @@ async fn can_upsert_then_batch_get() {
         .await
         .unwrap();
 
-    let id_3 = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let id_3 = generate_uuid(&format!("{}_3", stringify!(can_upsert_then_batch_get)));
 
     let ret = firestore
         .batch_get::<TestItem>(&vec![id_1, id_2, id_3], None)

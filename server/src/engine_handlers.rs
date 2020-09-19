@@ -343,30 +343,26 @@ pub async fn recall_job_for_user(
     info!("Handling: recall_job_for_user");
 
     match body.action {
-        schemas::RecallJobAction::Cancel => {
-            match api.cancel_job(&user_id, &job_id).await {
-                Ok(_) => Ok(reply::with_status(reply::json(&()), StatusCode::OK)),
-                Err(e) => Err(reject::custom(EngineError {
+        schemas::RecallJobAction::Cancel => match api.cancel_job(&user_id, &job_id).await {
+            Ok(_) => Ok(reply::with_status(reply::json(&()), StatusCode::OK)),
+            Err(e) => Err(reject::custom(EngineError {
+                error: e,
+                status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            })),
+        },
+        schemas::RecallJobAction::Complete => match api.complete_job(&user_id, &job_id).await {
+            Ok(report) => Ok(reply::with_status(reply::json(&report), StatusCode::OK)),
+            Err(e) => {
+                let status_code = match e.code {
+                    ErrorCode::JobNotComplete => StatusCode::CONFLICT,
+                    _ => get_http_code(&e),
+                };
+                Err(reject::custom(EngineError {
                     error: e,
-                    status_code: StatusCode::INTERNAL_SERVER_ERROR,
-                })),
+                    status_code,
+                }))
             }
         },
-        schemas::RecallJobAction::Complete => {
-            match api.complete_job(&user_id, &job_id).await {
-                Ok(report) => Ok(reply::with_status(reply::json(&report), StatusCode::OK)),
-                Err(e) => {
-                    let status_code = match e.code {
-                        ErrorCode::JobNotComplete => StatusCode::CONFLICT,
-                        _ => get_http_code(&e),
-                    };
-                    Err(reject::custom(EngineError {
-                        error: e,
-                        status_code,
-                    }))
-                },
-            }
-        }
     }
 }
 

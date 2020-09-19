@@ -1,9 +1,13 @@
 use crate as engine;
 use chrono::Utc;
-use engine::{constants, experience, job_board::JobBoard, job_board::JobTier, ErrorCategory, ErrorCode};
+use engine::{
+    constants, experience, job_board::JobBoard, job_board::JobTier, ErrorCategory, ErrorCode,
+};
 use futures::future;
-use pccg_rs_models::{Card, Character, CharacterEx, Job, JobPrototype, User, JobCompletionReport, ExperienceGain};
-use pccg_rs_storage::firestore::{FirestoreClient, TransactionType, Transaction};
+use pccg_rs_models::{
+    Card, Character, CharacterEx, ExperienceGain, Job, JobCompletionReport, JobPrototype, User,
+};
+use pccg_rs_storage::firestore::{FirestoreClient, Transaction, TransactionType};
 use rand::Rng;
 use std::{convert::TryInto, sync::Arc, time::Duration};
 use uuid::Uuid;
@@ -47,8 +51,10 @@ impl Api {
                     .await?;
                 if let Some(_) = self.users.get::<User>(user_id, Some(&t)).await? {
                     self.users.delete::<User>(user_id, Some(&t)).await?;
-                    Ok(self.users.commit_transaction(t).await?)
+                    t.commit().await?;
+                    Ok(())
                 } else {
+                    t.commit().await?;
                     Err(engine::Error::new(ErrorCode::UserNotFound, None))
                 }
             }
@@ -105,7 +111,7 @@ impl Api {
                     None => AddOrUpdateOperation::Add,
                 };
                 self.cards.upsert(&card.id, card.clone(), Some(&t)).await?;
-                self.cards.commit_transaction(t).await?;
+                t.commit().await?;
                 Ok(ret)
             }
             .await;
@@ -230,10 +236,7 @@ impl Api {
             .find(|j| j.character_ids.contains(character_id)))
     }
 
-    pub async fn list_characters(
-        &self,
-        user_id: &Uuid,
-    ) -> engine::Result<Vec<CharacterEx>> {
+    pub async fn list_characters(&self, user_id: &Uuid) -> engine::Result<Vec<CharacterEx>> {
         let mut retries: usize = 2;
         loop {
             let ret = async {
@@ -326,7 +329,7 @@ impl Api {
 
                     // Commit to storage
                     self.users.upsert(user_id, user, Some(&t)).await?;
-                    self.users.commit_transaction(t).await?;
+                    t.commit().await?;
 
                     Ok(new_currency_amount)
                 }
@@ -423,7 +426,7 @@ impl Api {
                                 fs.upsert(&character_id, character, Some(&t)).await?;
                                 user.staged_card = None;
                                 self.users.upsert(user_id, user, Some(&t)).await?;
-                                self.users.commit_transaction(t).await?;
+                                t.commit().await?;
                                 Ok(card)
                             } else {
                                 // ID of staged card does not match a card in compendium
@@ -483,7 +486,7 @@ impl Api {
                             user.currency = new_currency_amount;
                             user.staged_card = None;
                             self.users.upsert(user_id, user, Some(&t)).await?;
-                            self.users.commit_transaction(t).await?;
+                            t.commit().await?;
                             Ok(new_currency_amount)
                         } else {
                             // Requested card ID does not match the currently staged card ID
@@ -528,7 +531,11 @@ impl Api {
         Ok(fs.delete::<Job>(job_id, None).await?)
     }
 
-    pub async fn complete_job(&self, user_id: &Uuid, job_id: &Uuid) -> engine::Result<JobCompletionReport> {
+    pub async fn complete_job(
+        &self,
+        user_id: &Uuid,
+        job_id: &Uuid,
+    ) -> engine::Result<JobCompletionReport> {
         let job_fs = FirestoreClient::new_for_subcollection(
             &self.users,
             user_id.to_string(),
@@ -538,15 +545,27 @@ impl Api {
         let mut retries: usize = 2;
         loop {
             let ret = async {
-                let t = self.users.begin_transaction(TransactionType::ReadWrite).await?;
+                let t = self
+                    .users
+                    .begin_transaction(TransactionType::ReadWrite)
+                    .await?;
                 if let Some(job) = job_fs.get::<Job>(job_id, Some(&t)).await? {
                     if job.can_complete() {
                         // Generate completion report
                         let report = self.generate_job_completion_report(job, &t).await?;
+
+                        // Apply currency rewards
+                        // TODO
+
                         // Apply experience changes
                         // TODO
+
                         // Delete job
                         job_fs.delete::<Job>(job_id, Some(&t)).await?;
+
+                        // Commit transaction
+                        t.commit().await?;
+
                         Ok(report)
                     } else {
                         Err(engine::Error::new(ErrorCode::JobNotComplete, None))
@@ -554,7 +573,8 @@ impl Api {
                 } else {
                     Err(engine::Error::new(ErrorCode::JobNotFound, None))
                 }
-            }.await;
+            }
+            .await;
 
             match ret {
                 Err(ref e) if retries > 0 => {
@@ -671,10 +691,9 @@ impl Api {
                 ));
 
                 job_fs.upsert(&job.id, job.clone(), Some(&t)).await?;
-                match job_fs.commit_transaction(t).await {
-                    Ok(_) => Ok(job),
-                    Err(e) => Err(engine::Error::from(e)),
-                }
+                t.commit().await?;
+
+                Ok(job)
             }
             .await;
 
@@ -693,7 +712,11 @@ impl Api {
         }
     }
 
-    async fn generate_job_completion_report(&self, job: Job, transaction: &Transaction) -> engine::Result<JobCompletionReport> {
+    async fn generate_job_completion_report(
+        &self,
+        job: Job,
+        transaction: &Transaction,
+    ) -> engine::Result<JobCompletionReport> {
         let char_fs = FirestoreClient::new_for_subcollection(
             &self.users,
             job.user_id.to_string(),
@@ -701,7 +724,9 @@ impl Api {
         );
 
         // TODO un-hardcode this
-        let char_map = char_fs.batch_get::<Character>(&job.character_ids, Some(transaction)).await?;
+        let char_map = char_fs
+            .batch_get::<Character>(&job.character_ids, Some(transaction))
+            .await?;
         if !char_map.values().all(|c| c.is_some()) {
             // TODO handle this properly
             panic!();
@@ -711,7 +736,8 @@ impl Api {
         let mut exp_gains = vec![];
         for ch in chars.into_iter() {
             let exp_gain = 70;
-            let (level_after, exp_after) = experience::experience_add(ch.level, ch.experience, exp_gain);
+            let (level_after, exp_after) =
+                experience::experience_add(ch.level, ch.experience, exp_gain);
             exp_gains.push(ExperienceGain {
                 character_id: ch.id,
                 level_before: ch.level,
@@ -750,7 +776,7 @@ impl Api {
                             user.daily_last_claimed = Utc::now();
 
                             self.users.upsert(user_id, user, Some(&t)).await?;
-                            self.users.commit_transaction(t).await?;
+                            t.commit().await?;
                             Ok(new_currency_amount)
                         } else {
                             Err(engine::Error::new(ErrorCode::DailyAlreadyClaimed, None))

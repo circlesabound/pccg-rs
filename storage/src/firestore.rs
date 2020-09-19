@@ -21,8 +21,8 @@ use std::{
 };
 use tokio::{
     fs,
+    sync::mpsc,
     sync::oneshot::{self, error::TryRecvError},
-    sync::Mutex,
     sync::RwLock,
     task,
 };
@@ -103,7 +103,7 @@ impl FirestoreClient {
         ids: &Vec<Uuid>,
         transaction: Option<&Transaction>,
     ) -> storage::Result<HashMap<Uuid, Option<T>>> {
-        let mut names = vec![];
+        let mut id_to_name_map = HashMap::new();
         for id in ids.iter() {
             let name = format!(
                 "{}/{}/{}",
@@ -111,7 +111,7 @@ impl FirestoreClient {
                 self.collection_id,
                 id.to_string(),
             );
-            names.push(name);
+            id_to_name_map.insert(id.clone(), name);
         }
 
         let database = format!(
@@ -121,52 +121,39 @@ impl FirestoreClient {
 
         match self
             .firestore
-            .batch_get(&database, names, transaction)
+            .batch_get(
+                &database,
+                id_to_name_map.values().cloned().collect(),
+                transaction,
+            )
             .await
         {
-            Ok(batch_get_docs) => {
-                let mut map = HashMap::new();
-                for result in batch_get_docs.into_iter() {
-                    match result {
-                        BatchGetDocument::Found { found } => {
-                            let id = found.extract_id().unwrap();
-                            let doc: Result<T, _> = found.try_into();
-                            match doc {
-                                Ok(doc) => {
-                                    map.insert(id, Some(doc));
-                                }
+            Ok(mut doc_map) => {
+                Ok(id_to_name_map
+                    .into_iter()
+                    .map(|(id, name)| {
+                        let doc = doc_map.remove(&name).unwrap();
+                        let opt = match doc {
+                            Some(doc) => match doc.try_into() {
+                                Ok(t) => Some(t),
                                 Err(_) => {
-                                    error!("Failed to convert from Document to request typed.");
-                                    // For now, any failed conversions turn into a missing document
+                                    // For now treat conversion error as missing doc
+                                    error!("Failed to convert Document to requested type");
+                                    None
                                 }
-                            };
-                        }
-                        BatchGetDocument::Missing { missing: _ } => {
-                            // missing field
-                            // instead of parsing the name, we just do a completeness check later
-                        }
-                    }
-                }
-
-                // Fill in any missing documents with a None value
-                for id in ids.iter() {
-                    if !map.contains_key(id) {
-                        map.insert(*id, None);
-                    }
-                }
-
-                Ok(map)
+                            },
+                            None => None,
+                        };
+                        (id, opt)
+                    })
+                    .collect())
             }
             Err(e) => Err(e),
         }
     }
 
     pub async fn commit_transaction(&self, transaction: Transaction) -> storage::Result<()> {
-        let database = format!(
-            "projects/{}/databases/(default)/documents",
-            self.firestore.firebase_project_id,
-        );
-        self.firestore.commit(&database, transaction).await
+        self.firestore.commit(transaction).await
     }
 
     pub async fn delete<T: TryFrom<Document>>(
@@ -256,6 +243,8 @@ pub struct Firestore {
     _oauth_token: Arc<RwLock<String>>,
     _oauth_refresh_handle: task::JoinHandle<()>,
     _oauth_refresh_cancellation: oneshot::Sender<()>,
+    _drop_tx: mpsc::Sender<(String, String)>,
+    _drop_handle: task::JoinHandle<()>,
 }
 
 impl Firestore {
@@ -273,17 +262,17 @@ impl Firestore {
         let mut oauth_expires_in: u64 = oauth_expires_in as u64;
 
         // Start background task to refresh OAuth token
-        let (tx, mut rx) = oneshot::channel();
+        let (oauth_tx, mut oauth_rx) = oneshot::channel();
         let client_clone = Arc::clone(&client);
         let client_email = json_key.client_email.clone();
         let private_key = json_key.private_key.clone();
         let oauth_token_clone = Arc::clone(&oauth_token);
-        let handle = tokio::spawn(async move {
-            while let Err(TryRecvError::Empty) = rx.try_recv() {
+        let oauth_handle = tokio::spawn(async move {
+            while let Err(TryRecvError::Empty) = oauth_rx.try_recv() {
                 // Refresh token 10 minutes before expiration
                 let delay_duration = tokio::time::Duration::from_secs(oauth_expires_in - 600);
                 tokio::time::delay_for(delay_duration).await;
-                if let Err(TryRecvError::Closed) = rx.try_recv() {
+                if let Err(TryRecvError::Closed) = oauth_rx.try_recv() {
                     debug!("Stopping background task to refresh OAuth token");
                     break;
                 } else {
@@ -313,12 +302,51 @@ impl Firestore {
             }
         });
 
+        // Start background task to clean up dropped transactions
+        let (drop_tx, mut drop_rx) = mpsc::channel::<(String, String)>(50);
+        let client_clone = Arc::clone(&client);
+        let oauth_token_clone = Arc::clone(&oauth_token);
+        let drop_handle = tokio::spawn(async move {
+            while let Some((database, transaction_id)) = drop_rx.recv().await {
+                let uri = format!("https://firestore.googleapis.com/v1/{}:rollback", database,);
+                let body = RollbackRequest {
+                    transaction: transaction_id.clone(),
+                };
+                let req = build_firestore_request(
+                    Method::POST,
+                    &uri,
+                    &*oauth_token_clone.read().await,
+                    Some(&body),
+                )
+                .await
+                .unwrap();
+                debug!("POST {} {:?}", uri, req);
+                let resp = client_clone.request(req).await.unwrap();
+                let status = resp.status();
+                let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
+                debug!(
+                    "HTTP {} {}",
+                    status,
+                    String::from_utf8(body_bytes.to_vec())
+                        .unwrap_or_else(|_| "<mangled body>".to_owned()),
+                );
+                // TODO handle it properly?
+                match status {
+                    StatusCode::OK => debug!("Successfully dropped transaction {}", transaction_id),
+                    _ => error!("Error dropping transaction {}", transaction_id),
+                }
+            }
+            debug!("Stopping background task to clean up dropped transactions");
+        });
+
         Ok(Firestore {
             client,
             firebase_project_id: json_key.project_id,
             _oauth_token: oauth_token,
-            _oauth_refresh_handle: handle,
-            _oauth_refresh_cancellation: tx,
+            _oauth_refresh_handle: oauth_handle,
+            _oauth_refresh_cancellation: oauth_tx,
+            _drop_tx: drop_tx,
+            _drop_handle: drop_handle,
         })
     }
 
@@ -329,21 +357,18 @@ impl Firestore {
     ) -> storage::Result<Transaction> {
         let uri = format!(
             "https://firestore.googleapis.com/v1/{}:beginTransaction",
-            database
+            database,
         );
         let body = BeginTransactionRequest {
             options: transaction_opts,
         };
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(&uri)
-            .header(HeaderName::from_static("accept"), "application/json")
-            .header(
-                HeaderName::from_static("authorization"),
-                format!("Bearer {}", *self._oauth_token.read().await),
-            )
-            .body(Body::from(serde_json::to_string(&body)?))
-            .unwrap();
+        let req = build_firestore_request(
+            Method::POST,
+            &uri,
+            &*self._oauth_token.read().await,
+            Some(&body),
+        )
+        .await?;
         debug!("POST {} {:?}", uri, req);
         let resp = self.client.request(req).await?;
         let status = resp.status();
@@ -356,7 +381,13 @@ impl Firestore {
         match status {
             StatusCode::OK => {
                 let resp: BeginTransactionResponse = serde_json::from_slice(&body_bytes)?;
-                Ok(Transaction::new(resp.transaction))
+                Ok(Transaction::new(
+                    database.to_owned(),
+                    self._drop_tx.clone(),
+                    Arc::clone(&self.client),
+                    Arc::clone(&self._oauth_token),
+                    resp.transaction,
+                ))
             }
             _ => {
                 error!("Non-success status code {} in begin_transaction", status);
@@ -373,29 +404,45 @@ impl Firestore {
         database: &str,
         documents: Vec<String>,
         transaction: Option<&Transaction>,
-    ) -> storage::Result<Vec<BatchGetDocument>> {
+    ) -> storage::Result<HashMap<String, Option<Document>>> {
         let uri = format!(
             "https://firestore.googleapis.com/v1/{}/documents:batchGet",
             database
         );
-        let transaction_id_opt = match transaction {
-            Some(t) => Some(t.transaction_id.clone()),
-            None => None,
-        };
-        let body = BatchGetRequest {
-            documents,
-            transaction: transaction_id_opt,
-        };
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(&uri)
-            .header(HeaderName::from_static("accept"), "application/json")
-            .header(
-                HeaderName::from_static("authorization"),
-                format!("Bearer {}", *self._oauth_token.read().await),
-            )
-            .body(Body::from(serde_json::to_string(&body)?))
-            .unwrap();
+
+        let body: BatchGetRequest;
+        let mut ret = HashMap::new();
+
+        if let Some(t) = transaction {
+            // If part of a transaction, only request the docs that are not already cached
+            let mut filtered_doc_names = vec![];
+            for doc_name in documents.into_iter() {
+                if let Some(doc) = t.read_cache.read().await.get(&doc_name).cloned() {
+                    debug!("Transaction read cache hit for {}", doc_name);
+                    ret.insert(doc_name, Some(doc));
+                } else {
+                    filtered_doc_names.push(doc_name);
+                }
+            }
+
+            body = BatchGetRequest {
+                documents: filtered_doc_names,
+                transaction: Some(t.transaction_id.clone()),
+            };
+        } else {
+            body = BatchGetRequest {
+                documents,
+                transaction: None,
+            };
+        }
+
+        let req = build_firestore_request(
+            Method::POST,
+            &uri,
+            &*self._oauth_token.read().await,
+            Some(&body),
+        )
+        .await?;
         debug!("POST {} {:?}", uri, req);
         let resp = self.client.request(req).await?;
         let status = resp.status();
@@ -407,8 +454,19 @@ impl Firestore {
         );
         match status {
             StatusCode::OK => {
-                let results = serde_json::from_slice(&body_bytes)?;
-                Ok(results)
+                let batch_get_docs: Vec<BatchGetDocument> = serde_json::from_slice(&body_bytes)?;
+                for batch_get_doc in batch_get_docs.into_iter() {
+                    match batch_get_doc {
+                        BatchGetDocument::Found { found } => {
+                            let doc_name = found.name.clone();
+                            ret.insert(doc_name, Some(found));
+                        }
+                        BatchGetDocument::Missing { missing } => {
+                            ret.insert(missing, None);
+                        }
+                    }
+                }
+                Ok(ret)
             }
             _ => {
                 error!("Non-success status code {} in batch_get", status);
@@ -420,68 +478,19 @@ impl Firestore {
         }
     }
 
-    async fn commit(&self, database: &str, transaction: Transaction) -> storage::Result<()> {
-        let uri = format!("https://firestore.googleapis.com/v1/{}:commit", database);
-        let transaction_id = transaction.transaction_id.clone();
-        let writes = transaction.try_into_writes().await.unwrap();
-        let body = CommitRequest {
-            writes,
-            transaction: transaction_id,
-        };
-        debug!("{}", serde_json::to_string_pretty(&body)?);
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(&uri)
-            .header(HeaderName::from_static("accept"), "application/json")
-            .header(
-                HeaderName::from_static("authorization"),
-                format!("Bearer {}", *self._oauth_token.read().await),
-            )
-            .body(Body::from(serde_json::to_string(&body)?))
-            .unwrap();
-        debug!("POST {} {:?}", uri, req);
-        let resp = self.client.request(req).await?;
-        let status = resp.status();
-        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
-        debug!(
-            "HTTP {} {}",
-            status,
-            String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
-        );
-        match status {
-            StatusCode::OK => {
-                // TODO interpret write results
-                Ok(())
-            }
-            StatusCode::CONFLICT => {
-                // Write contention
-                // TODO retry
-                Err(storage::Error::Transaction(
-                    "Document contention, try again later".to_owned(),
-                ))
-            }
-            _ => {
-                error!("Non-success status code {} in commit", status);
-                Err(storage::Error::Other(format!(
-                    "Non-success status code {} in commit",
-                    status
-                )))
-            }
-        }
+    async fn commit(&self, transaction: Transaction) -> storage::Result<()> {
+        transaction.commit().await
     }
 
     async fn delete<T: TryFrom<Document>>(&self, name: &str) -> storage::Result<()> {
         let uri = format!("https://firestore.googleapis.com/v1/{}", name);
-        let req = Request::builder()
-            .method(Method::DELETE)
-            .uri(&uri)
-            .header(HeaderName::from_static("accept"), "application/json")
-            .header(
-                HeaderName::from_static("authorization"),
-                format!("Bearer {}", *self._oauth_token.read().await),
-            )
-            .body(Body::empty())
-            .unwrap();
+        let req = build_firestore_request::<()>(
+            Method::DELETE,
+            &uri,
+            &*self._oauth_token.read().await,
+            None,
+        )
+        .await?;
         debug!("DELETE {}", uri);
         let resp = self.client.request(req).await?;
         let status = resp.status();
@@ -500,11 +509,95 @@ impl Firestore {
         }
     }
 
+    async fn create_document<T: Into<Document>>(
+        &self,
+        parent: &str,
+        collection_id: &str,
+        document_id: &str,
+        value: T,
+    ) -> storage::Result<()> {
+        let uri = format!(
+            "https://firestore.googleapis.com/v1/{}/{}?documentId={}",
+            parent, collection_id, document_id
+        );
+        let doc: Document = value.into();
+        let req = build_firestore_request(
+            Method::POST,
+            &uri,
+            &*self._oauth_token.read().await,
+            Some(&doc),
+        )
+        .await?;
+        debug!("POST {} {:?}", uri, req);
+        let resp = self.client.request(req).await?;
+        let status = resp.status();
+        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
+        debug!(
+            "HTTP {} {}",
+            status,
+            String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
+        );
+        match status {
+            StatusCode::OK => Ok(()),
+            _ => {
+                if let Ok(e) = serde_json::from_slice::<FirestoreErrorResponse>(&body_bytes) {
+                    match e.status {
+                        FirestoreErrorCode::ABORTED =>
+                            Err(storage::Error::Transaction(
+                                "Document contention, try again later".to_owned(),
+                            )),
+                        FirestoreErrorCode::ALREADY_EXISTS =>
+                            Err(storage::Error::Conflict(format!(
+                                "Could not create document with id {} under parent '{}' collection '{}' as it already exists",
+                                document_id,
+                                parent,
+                                collection_id,
+                            ))),
+                        _ =>
+                            Err(storage::Error::Other(format!(
+                                "Error creating document with id {} under parent '{}' collection '{}': HTTP {} {}",
+                                document_id,
+                                parent,
+                                collection_id,
+                                status,
+                                String::from_utf8(body_bytes.to_vec())
+                                    .unwrap_or_else(|_| "<mangled body>".to_owned()),
+                            ))),
+                    }
+                } else {
+                    Err(storage::Error::Other(format!(
+                        "Error creating document with id {} under parent '{}' collection '{}': HTTP {} {}",
+                        document_id,
+                        parent,
+                        collection_id,
+                        status,
+                        String::from_utf8(body_bytes.to_vec())
+                            .unwrap_or_else(|_| "<mangled body>".to_owned()),
+                    )))
+                }
+            }
+        }
+    }
+
     async fn get<T: TryFrom<Document>>(
         &self,
         name: &str,
         transaction: Option<&Transaction>,
     ) -> storage::Result<Option<T>> {
+        // Check transaction read cache
+        if let Some(t) = transaction {
+            if let Some(doc) = t.read_cache.read().await.get(name).cloned() {
+                // Cache hit
+                match doc.try_into() {
+                    Ok(ret) => {
+                        debug!("Transaction read cache hit for {}", name);
+                        return Ok(Some(ret));
+                    },
+                    Err(_) => error!("Transaction read cache hit but failed to convert Document into requested type."),
+                }
+            }
+        }
+
         let uri = match transaction {
             Some(t) => format!(
                 "https://firestore.googleapis.com/v1/{}?transaction={}",
@@ -539,6 +632,12 @@ impl Firestore {
         match status {
             StatusCode::OK => {
                 let doc: Document = serde_json::from_slice(&body_bytes)?;
+
+                // Add to transaction read cache
+                if let Some(t) = transaction {
+                    t.cache_read(name.to_owned(), doc.clone()).await;
+                }
+
                 let result: Result<T, _> = doc.try_into();
                 match result {
                     Ok(ret) => Ok(Some(ret)),
@@ -555,57 +654,6 @@ impl Firestore {
                     status
                 )))
             }
-        }
-    }
-
-    async fn create_document<T: Into<Document>>(
-        &self,
-        parent: &str,
-        collection_id: &str,
-        document_id: &str,
-        value: T,
-    ) -> storage::Result<()> {
-        let uri = format!(
-            "https://firestore.googleapis.com/v1/{}/{}?documentId={}",
-            parent, collection_id, document_id
-        );
-        let doc: Document = value.into();
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(&uri)
-            .header(HeaderName::from_static("accept"), "application/json")
-            .header(
-                HeaderName::from_static("authorization"),
-                format!("Bearer {}", *self._oauth_token.read().await),
-            )
-            .body(Body::from(serde_json::to_string(&doc)?))
-            .unwrap();
-        debug!("POST {} {:?}", uri, req);
-        let resp = self.client.request(req).await?;
-        let status = resp.status();
-        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
-        debug!(
-            "HTTP {} {}",
-            status,
-            String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
-        );
-        match status {
-            StatusCode::OK => Ok(()),
-            StatusCode::CONFLICT => Err(storage::Error::Conflict(format!(
-                "Could not create document with id {} under parent '{}' collection '{}' as it already exists",
-                document_id,
-                parent,
-                collection_id,
-            ))),
-            _ => Err(storage::Error::Other(format!(
-                "Error creating document with id {} under parent '{}' collection '{}': HTTP {} {}",
-                document_id,
-                parent,
-                collection_id,
-                status,
-                String::from_utf8(body_bytes.to_vec())
-                    .unwrap_or_else(|_| "<mangled body>".to_owned()),
-            ))),
         }
     }
 
@@ -631,16 +679,13 @@ impl Firestore {
                 );
             }
 
-            let req = Request::builder()
-                .method(Method::GET)
-                .uri(&uri)
-                .header(HeaderName::from_static("accept"), "application/json")
-                .header(
-                    HeaderName::from_static("authorization"),
-                    format!("Bearer {}", *self._oauth_token.read().await),
-                )
-                .body(Body::empty())
-                .unwrap();
+            let req = build_firestore_request::<()>(
+                Method::GET,
+                &uri,
+                &*self._oauth_token.read().await,
+                None,
+            )
+            .await?;
             debug!("GET {}", uri);
             let resp = self.client.request(req).await?;
             let status = resp.status();
@@ -691,16 +736,13 @@ impl Firestore {
         // TODO return indication of whether it was an insert or an update if possible
         let uri = format!("https://firestore.googleapis.com/v1/{}", document_name);
         let doc: Document = value.into();
-        let req = Request::builder()
-            .method(Method::PATCH)
-            .uri(&uri)
-            .header(HeaderName::from_static("accept"), "application/json")
-            .header(
-                HeaderName::from_static("authorization"),
-                format!("Bearer {}", *self._oauth_token.read().await),
-            )
-            .body(Body::from(serde_json::to_string(&doc)?))
-            .unwrap();
+        let req = build_firestore_request(
+            Method::PATCH,
+            &uri,
+            &*self._oauth_token.read().await,
+            Some(&doc),
+        )
+        .await?;
         debug!("PATCH {} {:?}", uri, req);
         let resp = self.client.request(req).await?;
         let status = resp.status();
@@ -723,6 +765,13 @@ impl Firestore {
     }
 
     #[allow(dead_code)]
+    #[allow(unused_variables)]
+    async fn rollback(&self, transaction_id: String) -> storage::Result<()> {
+        // TODO Firestore::rollback
+        todo!()
+    }
+
+    #[allow(dead_code)]
     async fn run_query<T: TryFrom<Document>>(
         &self,
         _parent: &str,
@@ -733,7 +782,7 @@ impl Firestore {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
     pub name: String,
@@ -802,7 +851,7 @@ impl Document {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DocumentField {
     NullValue,
@@ -868,13 +917,13 @@ impl DocumentField {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentArrayValue {
     pub values: Option<Vec<DocumentField>>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DocumentMapValue {
     pub fields: Option<HashMap<String, DocumentField>>,
 }
@@ -902,6 +951,12 @@ struct BeginTransactionResponse {
 #[serde(rename_all = "camelCase")]
 struct CommitRequest {
     writes: Vec<Write>,
+    transaction: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RollbackRequest {
     transaction: String,
 }
 
@@ -949,22 +1004,87 @@ struct StructuredQuery {
     limit: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize)]
+struct FirestoreErrorResponse {
+    code: u32,
+    message: String,
+    status: FirestoreErrorCode,
+}
+
+/// Canonical error codes from https://firebase.google.com/docs/firestore/use-rest-api#error_codes
+#[allow(non_camel_case_types)]
+#[derive(Debug, Deserialize)]
+enum FirestoreErrorCode {
+    ABORTED,
+    ALREADY_EXISTS,
+    DEADLINE_EXCEEDED,
+    FAILED_PRECONDITION,
+    INTERNAL,
+    INVALID_ARGUMENT,
+    NOT_FOUND,
+    PERMISSION_DENIED,
+    RESOURCE_EXHAUTED,
+    UNAUTHENTICATED,
+    UNAVAILABLE,
+}
+
 pub struct Transaction {
+    database: String,
+    drop_tx: mpsc::Sender<(String, String)>,
+    http_client: Arc<Client<HttpsConnector<HttpConnector>>>,
+    oauth_token: Arc<RwLock<String>>,
+    read_cache: Arc<RwLock<HashMap<String, Document>>>,
     transaction_id: String,
-    writes: Arc<Mutex<Option<Vec<Write>>>>,
+    writes: Arc<std::sync::Mutex<Option<Vec<Write>>>>,
 }
 
 impl Transaction {
-    fn new(id: String) -> Transaction {
+    fn new(
+        database: String,
+        drop_tx: mpsc::Sender<(String, String)>,
+        http_client: Arc<Client<HttpsConnector<HttpConnector>>>,
+        oauth_token: Arc<RwLock<String>>,
+        id: String,
+    ) -> Transaction {
         Transaction {
+            database,
+            drop_tx,
+            http_client,
+            oauth_token,
+            read_cache: Arc::new(RwLock::new(HashMap::new())),
             transaction_id: id,
-            writes: Arc::new(Mutex::new(Some(vec![]))),
+            writes: Arc::new(std::sync::Mutex::new(Some(vec![]))),
         }
     }
 
+    pub async fn abort(mut self) {
+        let mut mutex_guard = self.writes.lock().expect("Poisoned lock");
+        if let None = mutex_guard.take() {
+            warn!("Attempted to abort invalid transaction");
+        } else {
+            let database = self.database.clone();
+            let id = self.transaction_id.clone();
+            if let Err(err) = self.drop_tx.send((database, id)).await {
+                error!("Failed to abort transaction. Error: {}", err);
+            };
+        }
+    }
+
+    fn blocking_abort(
+        mut drop_tx: mpsc::Sender<(String, String)>,
+        database: String,
+        transaction_id: String,
+    ) {
+        if let Err(err) = drop_tx.try_send((database, transaction_id)) {
+            error!(
+                "Failed to abort transaction with blocking abort. Error: {}",
+                err
+            );
+        };
+    }
+
     async fn append_write(&self, write: Write) -> Result<(), TransactionError> {
-        let mut mutex_guard = self.writes.lock().await;
+        let mut mutex_guard = self.writes.lock().expect("Poisoned lock");
         match mutex_guard.as_mut() {
             Some(v) => {
                 v.push(write);
@@ -974,10 +1094,98 @@ impl Transaction {
         }
     }
 
+    pub async fn commit(self) -> storage::Result<()> {
+        let database = self.database.clone();
+        let http_client = Arc::clone(&self.http_client);
+        let oauth_token = Arc::clone(&self.oauth_token);
+        let transaction_id = self.transaction_id.clone();
+        let writes;
+        match self.try_into_writes().await {
+            Ok(w) => writes = w,
+            Err(TransactionError::InvalidState) => {
+                warn!("Attempted to commit a transaction that is in an invalid state.");
+                return Ok(());
+            }
+        }
+        let body = CommitRequest {
+            writes,
+            transaction: transaction_id,
+        };
+
+        Transaction::commit_internal(database, http_client, oauth_token, body).await
+    }
+
+    async fn commit_internal(
+        database: String,
+        http_client: Arc<Client<HttpsConnector<HttpConnector>>>,
+        oauth_token: Arc<RwLock<String>>,
+        request_body: CommitRequest,
+    ) -> storage::Result<()> {
+        let uri = format!("https://firestore.googleapis.com/v1/{}:commit", database);
+        debug!("{}", serde_json::to_string_pretty(&request_body)?);
+        let req = build_firestore_request(
+            Method::POST,
+            &uri,
+            &*oauth_token.read().await,
+            Some(&request_body),
+        )
+        .await?;
+        debug!("POST {} {:?}", uri, req);
+        let resp = http_client.request(req).await?;
+        let status = resp.status();
+        let body_bytes = body::to_bytes(resp.into_body()).await.unwrap_or_default();
+        debug!(
+            "HTTP {} {}",
+            status,
+            String::from_utf8(body_bytes.to_vec()).unwrap_or_else(|_| "<mangled body>".to_owned()),
+        );
+        match status {
+            StatusCode::OK => {
+                // TODO interpret write results
+                Ok(())
+            }
+            StatusCode::CONFLICT => {
+                // Write contention
+                Err(storage::Error::Transaction(
+                    "Document contention, try again later".to_owned(),
+                ))
+            }
+            _ => {
+                error!("Non-success status code {} in commit", status);
+                Err(storage::Error::Other(format!(
+                    "Non-success status code {} in commit",
+                    status
+                )))
+            }
+        }
+    }
+
+    async fn cache_read(&self, name: String, doc: Document) {
+        let mut write_guard = self.read_cache.write().await;
+        write_guard.insert(name, doc);
+    }
+
     async fn try_into_writes(self) -> Result<Vec<Write>, TransactionError> {
-        let mut mutex_guard = self.writes.lock().await;
-        let ret = mutex_guard.take();
-        ret.ok_or(TransactionError::InvalidState)
+        let mut mutex_guard = self.writes.lock().expect("Poisoned lock");
+        mutex_guard.take().ok_or(TransactionError::InvalidState)
+    }
+}
+
+impl Drop for Transaction {
+    fn drop(&mut self) {
+        let mut mutex_guard = self.writes.lock().expect("Poisoned lock");
+        if let Some(_) = mutex_guard.take() {
+            info!(
+                "Transaction {} is being dropped without an explicit abort or commit. Running an abort to clear the transaction",
+                self.transaction_id
+            );
+
+            Transaction::blocking_abort(
+                self.drop_tx.clone(),
+                self.database.clone(),
+                self.transaction_id.clone(),
+            );
+        }
     }
 }
 
@@ -1119,6 +1327,34 @@ async fn get_oauth_token(
             )))
         }
     }
+}
+
+async fn build_firestore_request<T>(
+    method: Method,
+    uri: &String,
+    auth_token: &String,
+    body: Option<&T>,
+) -> storage::Result<Request<Body>>
+where
+    T: Sized + Serialize,
+{
+    let b = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(HeaderName::from_static("accept"), "application/json")
+        .header(
+            HeaderName::from_static("authorization"),
+            format!("Bearer {}", auth_token),
+        );
+
+    let body = match body {
+        None => Body::empty(),
+        Some(b) => Body::from(serde_json::to_string(b)?),
+    };
+
+    let req = b.body(body).unwrap();
+
+    Ok(req)
 }
 
 #[cfg(test)]
