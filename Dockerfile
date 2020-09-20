@@ -1,7 +1,7 @@
 FROM rust:slim AS builder
 
 RUN apt update
-RUN apt install -y pkg-config libssl-dev
+RUN apt install -y pkg-config libssl-dev clang
 
 WORKDIR /usr/src/app
 COPY ./ .

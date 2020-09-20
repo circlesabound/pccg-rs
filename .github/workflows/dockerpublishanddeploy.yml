@@ -19,24 +19,29 @@ jobs:
       - uses: actions/checkout@v2
       - name: Run tests
         run: |
-          docker build . --file test.Dockerfile
+          docker build . \
+            --file test.Dockerfile
 
   push:
     needs: test
     runs-on: ubuntu-latest
+    if: ${{ github.event_name }} == push
     steps:
       - uses: actions/checkout@v2
+      - name: Log into registry
+        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+
       - name: Build image
         run: |
           COMMIT_HASH=$(git rev-parse --short "$GITHUB_SHA")
-          docker build . --file Dockerfile --tag image --build-arg GIT_COMMIT_HASH=$COMMIT_HASH
-
-      - name: Log into registry
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login docker.pkg.github.com -u ${{ github.actor }} --password-stdin
+          docker build . \
+            --file Dockerfile \
+            --tag image \
+            --build-arg GIT_COMMIT_HASH=$COMMIT_HASH
 
       - name: Push image
         run: |
-          IMAGE_ID=docker.pkg.github.com/${{ github.repository }}/$IMAGE_NAME
+          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/$IMAGE_NAME
           VERSION=$(git rev-parse --short "$GITHUB_SHA")
 
           echo IMAGE_ID=$IMAGE_ID
