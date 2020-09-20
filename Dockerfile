@@ -1,21 +1,18 @@
-FROM rust:slim AS builder
+FROM ekidd/rust-musl-builder AS builder
 
-RUN apt update
-RUN apt install -y pkg-config libssl-dev clang
-
-WORKDIR /usr/src/app
-COPY ./ .
+ADD --chown=rust:rust . ./
 RUN cargo build --release
 RUN cargo install --path server --verbose
 
-FROM debian:buster-slim AS final
+FROM alpine:latest AS final
 ARG GIT_COMMIT_HASH=unversioned
 ENV GIT_COMMIT_HASH=$GIT_COMMIT_HASH
 
-RUN apt update
-RUN apt install -y pkg-config openssl ca-certificates
+RUN apk add --no-cache openssl ca-certificates
 
-COPY --from=builder /usr/local/cargo/bin/pccg-rs /bin
-COPY config.toml /bin
+COPY --from=builder \
+    /home/rust/.cargo/bin/pccg-rs \
+    /usr/local/bin
+COPY config.toml /usr/local/bin
 EXPOSE 7224
-CMD ["pccg-rs", "/bin/config.toml"]
+CMD ["pccg-rs", "/usr/local/bin/config.toml"]
