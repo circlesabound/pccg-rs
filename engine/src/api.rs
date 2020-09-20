@@ -560,15 +560,26 @@ impl Api {
                         let report = self.generate_job_completion_report(job, &t).await?;
 
                         // Apply currency rewards
-                        let mut user = self.users.get::<User>(user_id, Some(&t)).await?.expect("User assumed to exist");
+                        let mut user = self
+                            .users
+                            .get::<User>(user_id, Some(&t))
+                            .await?
+                            .expect("User assumed to exist");
                         user.currency += report.currency_gain;
                         self.users.upsert(user_id, user, Some(&t)).await?;
 
                         // Apply experience changes
-                        let char_ids: Vec<Uuid> = report.experience_gain.iter().map(|eg| eg.character_id).collect();
+                        let char_ids: Vec<Uuid> = report
+                            .experience_gain
+                            .iter()
+                            .map(|eg| eg.character_id)
+                            .collect();
                         let mut chars = char_fs.batch_get::<Character>(&char_ids, Some(&t)).await?;
                         for eg in report.experience_gain.iter() {
-                            let mut ch = chars.remove(&eg.character_id).expect("Character assumed to exist").expect("Character assumed to exist");
+                            let mut ch = chars
+                                .remove(&eg.character_id)
+                                .expect("Character assumed to exist")
+                                .expect("Character assumed to exist");
                             ch.level = eg.level_after;
                             ch.experience = eg.exp_after;
                             char_fs.upsert(&eg.character_id, ch, Some(&t)).await?;
