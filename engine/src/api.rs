@@ -65,7 +65,7 @@ impl Api {
                     if let ErrorCategory::InternalRetryable = e.classify() {
                         info!("Caught retryable error, {} retries remaining", retries);
                         retries -= 1;
-                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                     } else {
                         break ret;
                     }
@@ -121,7 +121,7 @@ impl Api {
                     if let ErrorCategory::InternalRetryable = e.classify() {
                         info!("Caught retryable error, {} retries remaining", retries);
                         retries -= 1;
-                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                     } else {
                         break ret;
                     }
@@ -136,7 +136,7 @@ impl Api {
         if cards.is_empty() {
             Err(engine::Error::new(ErrorCode::CompendiumEmpty, None))
         } else {
-            let rnd = rand::thread_rng().gen_range(0, cards.len());
+            let rnd = rand::thread_rng().gen_range(0..cards.len());
             Ok(cards.swap_remove(rnd))
         }
     }
@@ -208,7 +208,7 @@ impl Api {
                     if let ErrorCategory::InternalRetryable = e.classify() {
                         info!("Caught retryable error, {} retries remaining", retries);
                         retries -= 1;
-                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                     } else {
                         break ret;
                     }
@@ -281,7 +281,7 @@ impl Api {
                     if let ErrorCategory::InternalRetryable = e.classify() {
                         info!("Caught retryable error, {} retries remaining", retries);
                         retries -= 1;
-                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                     } else {
                         break ret;
                     }
@@ -341,7 +341,7 @@ impl Api {
                     if let ErrorCategory::InternalRetryable = e.classify() {
                         info!("Caught retryable error, {} retries remaining", retries);
                         retries -= 1;
-                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                     } else {
                         break ret;
                     }
@@ -388,7 +388,7 @@ impl Api {
                     if let ErrorCategory::InternalRetryable = e.classify() {
                         info!("Caught retryable error, {} retries remaining", retries);
                         retries -= 1;
-                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                     } else {
                         break ret;
                     }
@@ -456,7 +456,7 @@ impl Api {
                     if let ErrorCategory::InternalRetryable = e.classify() {
                         info!("Caught retryable error, {} retries remaining", retries);
                         retries -= 1;
-                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                     } else {
                         break ret;
                     }
@@ -507,7 +507,7 @@ impl Api {
                     if let ErrorCategory::InternalRetryable = e.classify() {
                         info!("Caught retryable error, {} retries remaining", retries);
                         retries -= 1;
-                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                     } else {
                         break ret;
                     }
@@ -606,7 +606,7 @@ impl Api {
                     if let ErrorCategory::InternalRetryable = e.classify() {
                         info!("Caught retryable error, {} retries remaining", retries);
                         retries -= 1;
-                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                     } else {
                         break ret;
                     }
@@ -727,7 +727,7 @@ impl Api {
                     if let ErrorCategory::InternalRetryable = e.classify() {
                         info!("Caught retryable error, {} retries remaining", retries);
                         retries -= 1;
-                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                     } else {
                         break ret;
                     }
@@ -817,7 +817,7 @@ impl Api {
                     if let ErrorCategory::InternalRetryable = e.classify() {
                         info!("Caught retryable error, {} retries remaining", retries);
                         retries -= 1;
-                        tokio::time::delay_for(Duration::from_millis(300)).await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
                     } else {
                         break ret;
                     }

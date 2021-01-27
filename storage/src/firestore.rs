@@ -271,7 +271,7 @@ impl Firestore {
             while let Err(TryRecvError::Empty) = oauth_rx.try_recv() {
                 // Refresh token 10 minutes before expiration
                 let delay_duration = tokio::time::Duration::from_secs(oauth_expires_in - 600);
-                tokio::time::delay_for(delay_duration).await;
+                tokio::time::sleep(delay_duration).await;
                 if let Err(TryRecvError::Closed) = oauth_rx.try_recv() {
                     debug!("Stopping background task to refresh OAuth token");
                     break;
@@ -1057,7 +1057,7 @@ impl Transaction {
         }
     }
 
-    pub async fn abort(mut self) {
+    pub async fn abort(self) {
         let mut mutex_guard = self.writes.lock().expect("Poisoned lock");
         if let None = mutex_guard.take() {
             warn!("Attempted to abort invalid transaction");
@@ -1071,7 +1071,7 @@ impl Transaction {
     }
 
     fn blocking_abort(
-        mut drop_tx: mpsc::Sender<(String, String)>,
+        drop_tx: mpsc::Sender<(String, String)>,
         database: String,
         transaction_id: String,
     ) {
@@ -1368,7 +1368,7 @@ mod tests {
 
     static FAKE_JSON_KEY_PATH: &str = "fake_service_account.json";
 
-    #[tokio::test(threaded_scheduler)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn can_read_key_from_json() {
         logging_init();
 
@@ -1378,7 +1378,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(threaded_scheduler)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn can_build_jwt() {
         logging_init();
 
@@ -1393,7 +1393,7 @@ mod tests {
     static JSON_KEY_PATH: &str = "../secrets/service_account.json";
 
     #[cfg(feature = "test_requires_secrets")]
-    #[tokio::test(threaded_scheduler)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn can_get_oauth_token() {
         logging_init();
 

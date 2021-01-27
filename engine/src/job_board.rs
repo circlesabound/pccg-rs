@@ -53,7 +53,7 @@ impl JobBoard {
                 } else {
                     debug!("Jobs already generated for {}", current_date);
                 }
-                tokio::time::delay_for(Duration::from_secs(60)).await;
+                tokio::time::sleep(Duration::from_secs(60)).await;
             }
         });
 

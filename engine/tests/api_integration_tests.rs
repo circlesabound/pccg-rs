@@ -36,14 +36,14 @@ async fn recreate_user(api: Arc<Api>, user_id: &Uuid) {
         }
     }
 
-    tokio::time::delay_for(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     if let Err(e) = api.add_user(&user_id).await {
         assert!(false, "Unexpected error when recreating user: {:?}", e);
     }
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn claim_daily_increases_currency_once() {
     logging_init();
 
@@ -58,7 +58,7 @@ async fn claim_daily_increases_currency_once() {
     .await;
     let api = Arc::new(Api::new(cards, job_board, users).await);
 
-    tokio::time::delay_for(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Add a new user
     info!(
@@ -76,7 +76,7 @@ async fn claim_daily_increases_currency_once() {
     let user = api.get_user(&user_id).await.unwrap().unwrap();
     let starting_currency = user.currency;
 
-    tokio::time::delay_for(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Claim daily first time
     info!(
@@ -85,7 +85,7 @@ async fn claim_daily_increases_currency_once() {
     );
     let ret = api.claim_user_daily_reward(&user_id).await;
 
-    tokio::time::delay_for(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Claim daily second time
     info!(
@@ -94,7 +94,7 @@ async fn claim_daily_increases_currency_once() {
     );
     let ret2 = api.claim_user_daily_reward(&user_id).await;
 
-    tokio::time::delay_for(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Fetch the updated currency amount
     info!(
@@ -117,7 +117,7 @@ async fn claim_daily_increases_currency_once() {
     );
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn can_complete_finished_job() {
     logging_init();
 
@@ -132,7 +132,7 @@ async fn can_complete_finished_job() {
     .await;
     let api = Arc::new(Api::new(cards, job_board, users).await);
 
-    tokio::time::delay_for(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Add a new user
     info!(
@@ -145,7 +145,7 @@ async fn can_complete_finished_job() {
     // TODO
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn cannot_complete_unfinished_job() {
     logging_init();
 
@@ -160,7 +160,7 @@ async fn cannot_complete_unfinished_job() {
     .await;
     let api = Arc::new(Api::new(cards, job_board, users).await);
 
-    tokio::time::delay_for(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Add a new user
     info!(

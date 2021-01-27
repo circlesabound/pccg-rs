@@ -24,7 +24,7 @@ fn generate_uuid(string: &str) -> Uuid {
     Uuid::new_v5(&namespace, string.as_bytes())
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn can_upsert_then_get() {
     logging_init();
 
@@ -44,7 +44,7 @@ async fn can_upsert_then_get() {
     assert_eq!(ret, test_item);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn can_list_empty_collection() {
     logging_init();
 
@@ -58,7 +58,7 @@ async fn can_list_empty_collection() {
     assert_eq!(ret, vec![]);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn can_list_non_empty_collection() {
     logging_init();
 
@@ -83,7 +83,7 @@ async fn can_list_non_empty_collection() {
     assert_eq!(ret[0], test_item);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn can_list_empty_subcollection() {
     logging_init();
 
@@ -102,7 +102,7 @@ async fn can_list_empty_subcollection() {
     assert_eq!(ret, vec![]);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn can_list_non_empty_subcollection() {
     logging_init();
 
@@ -126,7 +126,7 @@ async fn can_list_non_empty_subcollection() {
     assert_eq!(ret[0], test_item);
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn can_upsert_then_batch_get() {
     logging_init();
 
